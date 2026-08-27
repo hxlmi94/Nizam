@@ -10,14 +10,6 @@ import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
-// node-postgres, hassasiyet kaybı olmasın diye bigint (id sütunları) ve
-// numeric (tutar sütunları) değerlerini varsayılan olarak METİN (string) döner
-// — Supabase'in eski davranışıyla (bunları sayı olarak dönüyordu) birebir
-// aynı olsun ve arayüzdeki id/id karşılaştırmaları ve tutar hesapları
-// bozulmasın diye burada sayıya çeviriyoruz.
-pg.types.setTypeParser(20, (val) => (val === null ? null : parseInt(val, 10))); // int8 / bigint
-pg.types.setTypeParser(1700, (val) => (val === null ? null : parseFloat(val))); // numeric
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -439,4 +431,105 @@ app.put('/api/settings/:key', requireAuth, async (req, res) => {
        values ($1, $2, $3::jsonb, now())
        on conflict (isletme_id, key) do update set value = excluded.value, updated_at = excluded.updated_at
        returning *`,
-      [isletme_id,
+      [isletme_id, req.params.key, JSON.stringify(value ?? null)]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// Sohbet asistanı (Claude)
+// ------------------------------------------------------------------
+app.post('/api/chat', requireAuth, async (req, res) => {
+  if (!anthropic) return res.status(503).json({ error: 'ANTHROPIC_API_KEY tanımlı değil' });
+  try {
+    const { message, history, isletme_id } = req.body || {};
+    if (!message) return res.status(400).json({ error: 'message gerekli' });
+    if (!isletme_id) return res.status(400).json({ error: 'isletme_id gerekli' });
+
+    const { rows: isletmeRows } = await q('select * from isletmeler where id = $1', [isletme_id]);
+    const isletme = isletmeRows[0];
+    const isletmeAdi = isletme?.ad || 'işletme';
+    const isSite = isletme?.tip === 'site';
+
+    let context = '';
+    let system = '';
+
+    if (isSite) {
+      // Güncel duruma dair kısa bir özet çıkar, asistanın gerçek verilerden haberi olsun
+      const [{ rows: apartments }, { rows: payments }, { rows: expenses }] = await Promise.all([
+        q('select no from apartments where isletme_id = $1', [isletme_id]),
+        q('select * from payments where isletme_id = $1', [isletme_id]),
+        q('select * from expenses where isletme_id = $1', [isletme_id]),
+      ]);
+      const months = [...new Set((payments || []).filter((p) => p.tur === 'aidat').map((p) => p.donem))].sort();
+      const lastMonth = months[months.length - 1];
+      const lastMonthRows = (payments || []).filter((p) => p.tur === 'aidat' && p.donem === lastMonth);
+      const odenmeyen = lastMonthRows.filter((p) => p.durum === 'ÖDENMEDİ').length;
+      const tahsil = lastMonthRows.reduce((s, p) => s + (Number(p.tutar_odenen) || 0), 0);
+      const flagged = (payments || []).filter((p) => ['KONTROL EDİLSİN', 'VERMİYOR'].includes(p.durum));
+      const giderToplam = (expenses || []).filter((e) => e.durum === 'ÖDENDİ').reduce((s, e) => s + (Number(e.tutar) || 0), 0);
+
+      context = `
+Toplam daire sayısı: ${apartments?.length || 0}
+Son işlenen aidat ayı: ${lastMonth || 'yok'}
+Bu ayki tahsilat: ${tahsil.toLocaleString('tr-TR')} ₺
+Bu ay ödemeyen daire sayısı: ${odenmeyen}
+Dikkat gereken kayıt sayısı (kontrol/vermiyor): ${flagged.length}
+Toplam ödenen gider (tüm zamanlar): ${giderToplam.toLocaleString('tr-TR')} ₺
+`.trim();
+
+      system = `Sen "${isletmeAdi}" sitesinin yönetim asistanısın. Yıllarca site/apartman yönetimi muhasebesi yapmış, Kat Mülkiyeti Kanunu'na hakim, deneyimli bir mali müşavir gibi davran: net, pratik ve güven verici konuş.
+
+Bilmen gereken temel mevzuat noktaları (genel bilgi olarak kullan):
+- Karar Defteri: Kat malikleri kurulu kararlarının yazıldığı, noter onaylı, sayfaları numaralı defter. Her yıl 31 Aralık'a kadar noterde kapanış tasdiki yapılması gerekir (KMK md. 32).
+- Gelir-Gider Defteri: Tüm aidat tahsilatı ve giderlerin işlendiği, noter onaylı defter; fatura/makbuzlar saklanmalı.
+- İşletme Projesi: Yıllık tahmini gelir-gider ve her dairenin payını gösteren, kat maliklerine tebliğ edilmesi gereken belge (KMK md. 37). İtirazlar 7 gün içinde yapılabilir.
+- Yedek akçe genellikle yıllık gider toplamının %10'unu geçmeyecek şekilde belirlenir.
+- Ortak giderler iki şekilde paylaştırılır: kapıcı/güvenlik gibi hizmetler eşit, diğer giderler (elektrik, bakım vb.) arsa payı/alan oranında.
+
+Yöneticiye aidat, demirbaş, fatura/gider, personel takibi ve site muhasebesiyle ilgili sorularda yardımcı ol. Uygulamanın Özet sekmesindeki "Raporlar ve Belgeler" bölümünde Gelir-Gider Tablosu, İşletme Projesi Hesaplayıcı, Genel Kurul Özet Raporu ve Yasal Belgeler takip listesi olduğunu biliyorsun; ilgili sorularda oraya yönlendirebilirsin.
+
+Her zaman Türkçe, kısa ve net cevaplar ver. Kesin hukuki veya vergisel sonucu olan konularda (ceza, dava süreci, vergi mükellefiyeti gibi) genel bilgi verebilirsin ama bunun bağlayıcı hukuki/mali tavsiye olmadığını, kesinleşmesi gereken konularda bir mali müşavir veya avukata danışılmasını belirt. Aşağıda uygulamanın güncel veri özeti var, sorular buna göre yanıtlanabilir; ama tam liste/detay gerekiyorsa yöneticiye uygulama içindeki ilgili sekmeye bakmasını söyle (elinde satır satır veri yok, sadece bu özet var).\n\nGÜNCEL DURUM:\n${context}`;
+    } else {
+      const [{ rows: gelirler }, { rows: expenses }] = await Promise.all([
+        q('select * from gelirler where isletme_id = $1', [isletme_id]),
+        q('select * from expenses where isletme_id = $1', [isletme_id]),
+      ]);
+      const gelirToplam = (gelirler || []).filter((g) => g.durum === 'ÖDENDİ').reduce((s, g) => s + (Number(g.tutar) || 0), 0);
+      const giderToplam = (expenses || []).filter((e) => e.durum === 'ÖDENDİ').reduce((s, e) => s + (Number(e.tutar) || 0), 0);
+
+      context = `
+Toplam gelen para (ödendi işaretli): ${gelirToplam.toLocaleString('tr-TR')} ₺
+Toplam ödenen gider: ${giderToplam.toLocaleString('tr-TR')} ₺
+Net durum: ${(gelirToplam - giderToplam).toLocaleString('tr-TR')} ₺
+`.trim();
+
+      system = `Sen "${isletmeAdi}" işletmesinin (ofis veya inşaat projesi olabilir) muhasebe asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi hakkında sorulara yardımcı ol. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nGÜNCEL DURUM:\n${context}`;
+    }
+
+    const msg = await anthropic.messages.create({
+      model: CHAT_MODEL,
+      max_tokens: 1024,
+      system,
+      messages: [...(Array.isArray(history) ? history : []), { role: 'user', content: message }],
+    });
+    const text = msg.content.find((b) => b.type === 'text')?.text || '';
+    res.json({ response: text });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SPA fallback — bilinmeyen GET istekleri index.html'e düşsün
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Nizam sunucusu ${PORT} portunda çalışıyor`));
