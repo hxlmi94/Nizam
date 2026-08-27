@@ -113,64 +113,79 @@ button{font-family:inherit;}
 ::selection{background:var(--gold-soft);}
 a{color:inherit;}
 
-/* ============================= LAYOUT ============================= */
-#app{max-width:640px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;position:relative;}
-
-.topbar{
-  position:sticky;top:0;z-index:20;
-  background:linear-gradient(155deg, var(--brand-2), var(--brand) 65%);color:var(--brand-ink);
-  padding:calc(env(safe-area-inset-top,0px) + 16px) 18px 14px;
-  box-shadow:var(--shadow);
-  border-bottom:2px solid var(--gold-line);
-}
-.topbar-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-.brand{display:flex;align-items:center;gap:10px;}
-.brand-mark{
-  width:34px;height:34px;border-radius:9px;background:var(--gold);
-  border:1px solid var(--gold-line);
-  display:flex;align-items:center;justify-content:center;
-  font-family:var(--font-display);font-weight:700;color:#1C2733;font-size:19px;flex:none;
-}
-.brand-text h1{font-size:19px;color:var(--brand-ink);}
-.brand-text p{margin:1px 0 0;font-size:11.5px;color:var(--brand-ink);opacity:.72;letter-spacing:.02em;}
-
-.month-pill{
-  display:flex;align-items:center;gap:6px;
-  background:rgba(255,255,255,.12);
-  border:1px solid rgba(255,255,255,.22);
-  color:var(--brand-ink);
-  border-radius:999px;padding:7px 12px;font-size:13px;font-weight:600;
-  white-space:nowrap;
-}
-.month-pill select{
-  background:transparent;border:none;color:inherit;font:inherit;font-weight:700;
-  -webkit-appearance:none;appearance:none;padding-right:2px;
-}
-.month-pill select option{color:#111;}
-.month-pill svg{width:15px;height:15px;stroke:var(--brand-ink);fill:none;stroke-width:1.8;opacity:.85;}
-
-main{flex:1;padding:16px 16px calc(96px + env(safe-area-inset-bottom,0px));}
+/* ============================= LAYOUT (bilgisayar sistemi görünümü) ============================= */
+#app{min-height:100dvh;position:relative;}
+.shell{display:grid;grid-template-columns:222px 1fr;min-height:100dvh;}
 .hide{display:none !important;}
 
-/* ============================= BOTTOM NAV ============================= */
-nav.tabbar{
-  position:fixed;left:0;right:0;bottom:0;z-index:30;
-  max-width:640px;margin:0 auto;
-  background:var(--surface);
-  border-top:1px solid var(--line);
-  display:flex;
-  padding-bottom:env(safe-area-inset-bottom,0px);
-  box-shadow:0 -6px 20px -10px rgba(20,30,25,.25);
+.sidebar{
+  background:linear-gradient(180deg, var(--brand-2), var(--brand) 70%);color:var(--brand-ink);
+  padding:18px 14px;display:flex;flex-direction:column;
+  position:sticky;top:0;height:100dvh;overflow-y:auto;
 }
-nav.tabbar button{
-  flex:1;background:none;border:none;padding:10px 4px 9px;
-  display:flex;flex-direction:column;align-items:center;gap:3px;
-  color:var(--ink-dim);cursor:pointer;
+.sidebar-brand{display:flex;align-items:center;gap:9px;padding:4px 6px 18px;border-bottom:1px solid rgba(255,255,255,.14);margin-bottom:14px;}
+.sidebar-brand .mark{
+  width:30px;height:30px;border-radius:8px;border:1px solid var(--gold-line);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-display);font-weight:700;color:var(--gold-line);font-size:15px;flex:none;
 }
-nav.tabbar button svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;}
-nav.tabbar button span{font-size:10.5px;font-weight:700;letter-spacing:.01em;}
-nav.tabbar button.active{color:var(--brand);}
-nav.tabbar button.active svg{stroke:var(--brand);}
+.sidebar-brand .name{font-family:var(--font-display);font-weight:700;font-size:16px;}
+.isletme-pill{
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);border-radius:9px;
+  padding:9px 10px;font-size:11px;color:rgba(241,245,249,.72);margin-bottom:16px;
+  display:flex;justify-content:space-between;align-items:center;gap:6px;
+  cursor:pointer;text-align:left;width:100%;font-family:inherit;
+}
+.isletme-pill b{color:var(--brand-ink);font-size:12.5px;display:block;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.isletme-pill svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2.2;flex:none;opacity:.7;}
+.month-pill{
+  display:flex;align-items:center;gap:6px;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:var(--brand-ink);
+  border-radius:9px;padding:8px 10px;font-size:12px;font-weight:600;margin-bottom:16px;
+}
+.month-pill select{background:transparent;border:none;color:inherit;font:inherit;font-weight:700;-webkit-appearance:none;appearance:none;width:100%;}
+.month-pill select option{color:#111;}
+.month-pill svg{width:14px;height:14px;stroke:var(--brand-ink);fill:none;stroke-width:1.8;opacity:.85;flex:none;}
+
+.sidebar nav{display:flex;flex-direction:column;gap:2px;}
+.sidebar nav button{
+  color:rgba(241,245,249,.72);text-decoration:none;font-size:12.5px;font-weight:600;
+  padding:9px 10px;border-radius:7px;display:flex;align-items:center;gap:9px;letter-spacing:.01em;
+  background:none;border:none;cursor:pointer;font-family:inherit;text-align:left;width:100%;
+}
+.sidebar nav button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;opacity:.85;flex:none;}
+.sidebar nav button.active{background:rgba(255,255,255,.1);color:#fff;box-shadow:inset 2px 0 0 var(--gold-line);}
+.sidebar nav button.active svg{opacity:1;}
+.sidebar-foot{margin-top:auto;padding-top:14px;border-top:1px solid rgba(255,255,255,.14);font-size:11px;color:rgba(241,245,249,.55);}
+.sidebar-foot button{margin-top:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:var(--brand-ink);border-radius:7px;padding:6px 9px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:inherit;}
+.sidebar-foot button svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.8;}
+
+main{padding:22px 26px 60px;max-width:1280px;}
+
+.page-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px;flex-wrap:wrap;}
+.page-head h1{font-family:var(--font-display);font-size:20px;font-weight:600;}
+.page-head .sub{color:var(--ink-dim);font-size:12px;margin-top:2px;}
+.page-head .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.btn-toolbar{
+  display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);
+  color:var(--ink);border-radius:7px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;
+}
+.btn-toolbar.gold{background:var(--brand);color:var(--gold-soft);border-color:var(--brand);}
+.btn-toolbar svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.3;}
+
+/* Responsive: dar ekranda (telefon) kenar çubuğu üstte yatay bir şeride dönüşür */
+@media (max-width:899px){
+  .shell{grid-template-columns:1fr;}
+  .sidebar{position:sticky;top:0;height:auto;flex-direction:row;flex-wrap:nowrap;align-items:center;overflow-x:auto;overflow-anchor:none;padding:10px 12px;z-index:20;}
+  .sidebar-brand{flex:none;border-bottom:none;margin-bottom:0;padding:0 12px 0 0;border-right:1px solid rgba(255,255,255,.14);}
+  .isletme-pill{flex:none;width:auto;margin-bottom:0;margin-left:10px;}
+  .month-pill{flex:none;margin-bottom:0;margin-left:10px;}
+  .sidebar nav{flex:none;flex-direction:row;margin-left:10px;}
+  .sidebar nav button{flex:none;width:auto;white-space:nowrap;}
+  .sidebar-foot{flex:none;margin-top:0;margin-left:auto;padding-top:0;border-top:none;display:flex;align-items:center;}
+  .sidebar-foot button{flex:none;margin-top:0;margin-left:10px;}
+  main{padding:16px 16px 40px;}
+}
 
 /* ============================= COMPONENTS ============================= */
 .section-title{
@@ -243,14 +258,6 @@ nav.tabbar button.active svg{stroke:var(--brand);}
 .searchbar input{border:none;background:none;outline:none;font:inherit;font-size:14.5px;color:var(--ink);width:100%;}
 .searchbar input::placeholder{color:var(--ink-dim);}
 
-.fab{
-  position:fixed;right:calc(50% - 320px + 18px);bottom:calc(90px + env(safe-area-inset-bottom,0px));
-  width:52px;height:52px;border-radius:16px;background:var(--gold);color:#1C2733;
-  border:none;box-shadow:0 10px 24px -8px rgba(30,58,95,.45);
-  display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:25;
-}
-.fab svg{width:23px;height:23px;stroke:currentColor;stroke-width:2.3;fill:none;}
-@media (max-width:679px){ .fab{right:18px;} }
 
 .btn{
   display:inline-flex;align-items:center;justify-content:center;gap:7px;
@@ -317,6 +324,32 @@ table.plain td.mono{text-align:right;}
 table.plain tbody tr:nth-child(even){background:var(--surface-2);}
 table.plain tbody tr:nth-child(even) td{padding-left:8px;}
 
+/* ---------------- KPI şeridi (Özet ve diğer ekranlarda üst özet kutucukları) ---------------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:20px;}
+.kpi{background:var(--surface);padding:12px 16px;}
+.kpi .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-dim);font-weight:700;}
+.kpi .val{font-family:var(--font-mono);font-size:19px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;}
+.kpi.warn .val{color:var(--warning);}
+.kpi.bad .val{color:var(--danger);}
+.kpi.good .val{color:var(--success);}
+.kpi .delta{font-size:10.5px;color:var(--ink-dim);margin-top:2px;}
+
+/* ---------------- Kayıt tablosu (Daireler / Giderler / Personel gibi listeler) ---------------- */
+.table-card{background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+.table-card .table-card-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);gap:10px;flex-wrap:wrap;}
+.table-card .table-card-head h2{font-family:var(--font-display);font-size:14.5px;font-weight:600;margin:0;}
+.table-scroll{overflow-x:auto;}
+table.table-pro{width:100%;border-collapse:collapse;font-size:12.5px;}
+table.table-pro thead th{background:var(--surface-2);text-align:left;padding:9px 14px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-dim);font-weight:700;border-bottom:1px solid var(--line);white-space:nowrap;}
+table.table-pro thead th.num{text-align:right;}
+table.table-pro tbody td{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--ink);white-space:nowrap;}
+table.table-pro tbody td.num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
+table.table-pro tbody tr:nth-child(even){background:#FAFBFC;}
+table.table-pro tbody tr{cursor:pointer;}
+table.table-pro tbody tr:hover{background:var(--gold-soft);}
+table.table-pro .name-cell{font-weight:700;}
+.table-foot-row{padding:9px 16px;font-size:11px;color:var(--ink-dim);border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;}
+
 .empty{padding:40px 16px;text-align:center;color:var(--ink-dim);}
 .empty svg{width:34px;height:34px;stroke:var(--ink-dim);fill:none;stroke-width:1.5;margin-bottom:10px;}
 
@@ -345,7 +378,7 @@ table.plain tbody tr:nth-child(even) td{padding-left:8px;}
 .gate .err{color:var(--danger);font-size:13px;font-weight:600;min-height:16px;}
 
 /* chat */
-.chat-wrap{display:flex;flex-direction:column;height:calc(100dvh - 158px - env(safe-area-inset-bottom,0px));margin:-16px -16px 0;}
+.chat-wrap{display:flex;flex-direction:column;height:calc(100dvh - 190px);background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .chat-log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;}
 .msg{max-width:84%;padding:11px 14px;border-radius:16px;font-size:14px;line-height:1.45;white-space:pre-wrap;}
 .msg.user{align-self:flex-end;background:var(--brand);color:var(--brand-ink);border-bottom-right-radius:5px;}
@@ -406,6 +439,10 @@ function monthLabel(donem){ // 'YYYY-MM' -> 'Haziran 2026'
   if(!donem) return '';
   const [y,m] = donem.split('-');
   return `${MONTH_NAMES[m]||m} ${y}`;
+}
+function monthShort(donem){ // 'YYYY-MM' -> 'Haz'
+  if(!donem) return '';
+  return (MONTH_NAMES[donem.slice(5,7)]||'').slice(0,3);
 }
 function tl(n){
   if(n===null||n===undefined||n==='') return '—';
@@ -620,41 +657,47 @@ function logout(){
 /* ---------------------------- ROOT RENDER ---------------------------- */
 function render(){
   const app = document.getElementById('app');
-  const showFab = ['daireler','gelir','giderler','personel'].includes(STATE.tab);
-  app.innerHTML = `
-    ${renderTopbar()}
-    <main id="main"></main>
-    ${renderTabbar()}
-    ${showFab ? `<button class="fab" id="fabBtn" title="Ekle">${ICON.plus}</button>` : ''}
-  `;
+  app.innerHTML = `<div class="shell">${renderSidebar()}<main id="main"></main></div>`;
   renderMain();
-  if(showFab) document.getElementById('fabBtn').onclick = onFab;
-  const isletmeBtn = document.getElementById('isletmeBtn');
-  if(isletmeBtn) isletmeBtn.onclick = openIsletmeSecSheet;
 }
 
-function renderTopbar(){
+function renderSidebar(){
   const monthOptions = STATE.months.map(m=>`<option value="${m}" ${m===STATE.currentMonth?'selected':''}>${monthLabel(m)}</option>`).join('');
   const i = currentIsletme();
   const ad = i?.ad || 'Yükleniyor...';
-  const altYazi = i ? (i.tip==='site' ? 'Bina Yönetim Defteri' : 'İşletme Defteri') : '';
+  const tabs = tabsFor();
+  if(!tabs.some(t=>t.id===STATE.tab)) STATE.tab = 'ozet';
+  const showMonthPill = isSiteTipi() && (STATE.tab==='ozet'||STATE.tab==='daireler') && STATE.months.length;
   return `
-  <header class="topbar">
-    <div class="topbar-row">
-      <button class="brand" id="isletmeBtn" style="background:none;border:none;padding:0;cursor:pointer;text-align:left;">
-        <div class="brand-mark">${esc((ad||'?').slice(0,1).toUpperCase())}</div>
-        <div class="brand-text">
-          <h1>${esc(ad)}</h1>
-          <p>${altYazi} <svg viewBox="0 0 24 24" style="width:11px;height:11px;display:inline-block;vertical-align:middle;transform:rotate(90deg);stroke:currentColor;fill:none;stroke-width:2.4;"><path d="m9 6 6 6-6 6"/></svg></p>
-        </div>
-      </button>
-      ${ (isSiteTipi() && (STATE.tab==='ozet'||STATE.tab==='daireler')) ? `
-      <div class="month-pill">
-        ${ICON.calendar}
-        <select id="monthSelect">${monthOptions}</select>
-      </div>` : `<button id="logoutBtn" title="Çıkış Yap" style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);color:var(--brand-ink);width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;">${ICON.logout}</button>`}
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark">N</div>
+      <div class="name">Nizam</div>
     </div>
-  </header>`;
+    <button class="isletme-pill" id="isletmeBtn" type="button">
+      <span style="min-width:0;">
+        <span style="opacity:.75;">İşletme</span>
+        <b>${esc(ad)}</b>
+      </span>
+      <svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+    </button>
+    ${showMonthPill ? `
+    <div class="month-pill">
+      ${ICON.calendar}
+      <select id="monthSelect">${monthOptions}</select>
+    </div>` : ''}
+    <nav>
+      ${tabs.map(t=>`
+        <button data-tab="${t.id}" class="${STATE.tab===t.id?'active':''}" type="button">
+          ${ICON[t.icon]}
+          <span>${t.label}</span>
+        </button>`).join('')}
+    </nav>
+    <div class="sidebar-foot">
+      Yönetici
+      <button id="logoutBtn" type="button">${ICON.logout} Çıkış Yap</button>
+    </div>
+  </aside>`;
 }
 
 function tabsFor(){
@@ -675,35 +718,49 @@ function tabsFor(){
     {id:'personel', label:'Personel', icon:'users'},
   ];
 }
-function renderTabbar(){
-  const tabs = tabsFor();
-  if(!tabs.some(t=>t.id===STATE.tab)) STATE.tab = 'ozet';
-  return `<nav class="tabbar">
-    ${tabs.map(t=>`
-      <button data-tab="${t.id}" class="${STATE.tab===t.id?'active':''}">
-        ${ICON[t.icon]}
-        <span>${t.label}</span>
-      </button>`).join('')}
-  </nav>`;
-}
+
+const ADD_BTN_LABEL = {
+  daireler: 'Yeni Ay Ekle',
+  gelir: 'Yeni Gelir',
+  giderler: 'Yeni Gider',
+  personel: 'Yeni Personel',
+};
 
 function renderMain(){
   const main = document.getElementById('main');
-  if(STATE.tab==='ozet') main.innerHTML = renderOzet();
-  else if(STATE.tab==='daireler') main.innerHTML = renderDaireler();
-  else if(STATE.tab==='gelir') main.innerHTML = renderGelir();
-  else if(STATE.tab==='asistan') main.innerHTML = renderAsistan();
-  else if(STATE.tab==='giderler') main.innerHTML = renderGiderler();
-  else if(STATE.tab==='personel') main.innerHTML = renderPersonel();
+  const tabs = tabsFor();
+  const tabMeta = tabs.find(t=>t.id===STATE.tab) || tabs[0];
+  const i = currentIsletme();
+  const altYazi = i ? (i.tip==='site' ? 'Bina Yönetim Defteri' : 'İşletme Defteri') : '';
+  const addLabel = ADD_BTN_LABEL[STATE.tab];
+  const header = `
+    <div class="page-head">
+      <div>
+        <h1>${esc(tabMeta?.label||'')}</h1>
+        <div class="sub">${esc(i?.ad||'')}${altYazi?' · '+altYazi:''}</div>
+      </div>
+      ${addLabel ? `<div class="actions"><button class="btn-toolbar gold" id="pageAddBtn" type="button">${ICON.plus} ${addLabel}</button></div>` : ''}
+    </div>
+  `;
+  let body = '';
+  if(STATE.tab==='ozet') body = renderOzet();
+  else if(STATE.tab==='daireler') body = renderDaireler();
+  else if(STATE.tab==='gelir') body = renderGelir();
+  else if(STATE.tab==='asistan') body = renderAsistan();
+  else if(STATE.tab==='giderler') body = renderGiderler();
+  else if(STATE.tab==='personel') body = renderPersonel();
+  main.innerHTML = header + body;
   wireMain();
   if(STATE.tab==='asistan') wireAsistan();
-  const logoutBtn = document.getElementById('logoutBtn');
-  if(logoutBtn) logoutBtn.onclick = logout;
+  const addBtn = document.getElementById('pageAddBtn');
+  if(addBtn) addBtn.onclick = onFab;
 }
 
 document.addEventListener('click', (e)=>{
-  const tabBtn = e.target.closest('nav.tabbar button');
-  if(tabBtn){ STATE.tab = tabBtn.dataset.tab; render(); }
+  const tabBtn = e.target.closest('.sidebar nav button');
+  if(tabBtn){ STATE.tab = tabBtn.dataset.tab; render(); return; }
+  if(e.target.closest('#isletmeBtn')){ openIsletmeSecSheet(); return; }
+  if(e.target.closest('#logoutBtn')){ logout(); return; }
 });
 document.addEventListener('change', (e)=>{
   if(e.target.id==='monthSelect'){ STATE.currentMonth = e.target.value; renderMain(); }
@@ -907,26 +964,26 @@ function renderOzet(){
   return `
     ${!m ? `<div class="empty">${ICON.box}<div><b>Henüz bir ay eklenmedi.</b><br>Daireler sekmesinden ilk ayı ekleyerek başlayın.</div></div>` : `
     <div class="section-title">${monthLabel(m)} Özeti</div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="label">Aidat Tahsilatı</div>
-        <div class="value">${tl(tahsil)}</div>
-        <div class="sub">${odenen}/${STATE.apartments.length} daire ödedi</div>
+    <div class="kpis">
+      <div class="kpi good">
+        <div class="lbl">Aidat Tahsilatı</div>
+        <div class="val">${tl(tahsil)}</div>
+        <div class="delta">${odenen}/${STATE.apartments.length} daire ödedi</div>
       </div>
-      <div class="stat-card">
-        <div class="label">Ödenmeyen Daire</div>
-        <div class="value">${odenmemis}</div>
-        <div class="sub">bu ay için</div>
+      <div class="kpi ${odenmemis?'bad':'good'}">
+        <div class="lbl">Ödenmeyen Daire</div>
+        <div class="val">${odenmemis}</div>
+        <div class="delta">bu ay için</div>
       </div>
-      <div class="stat-card">
-        <div class="label">Demirbaş Tahsilatı</div>
-        <div class="value small">${tl(demirbasTahsil)}</div>
-        <div class="sub">${demirbasKalan} daire kaldı</div>
+      <div class="kpi">
+        <div class="lbl">Demirbaş Tahsilatı</div>
+        <div class="val" style="font-size:16px;">${tl(demirbasTahsil)}</div>
+        <div class="delta">${demirbasKalan} daire kaldı</div>
       </div>
-      <div class="stat-card">
-        <div class="label">Bu Ay Ödenen Gider</div>
-        <div class="value small">${tl(giderToplam)}</div>
-        <div class="sub">faturalar</div>
+      <div class="kpi">
+        <div class="lbl">Bu Ay Ödenen Gider</div>
+        <div class="val" style="font-size:16px;">${tl(giderToplam)}</div>
+        <div class="delta">faturalar</div>
       </div>
     </div>`}
 
@@ -974,21 +1031,21 @@ function renderOzetGenel(){
 
   return `
     <div class="section-title">${esc(currentIsletme()?.ad||'')} Özeti</div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="label">Toplam Gelen</div>
-        <div class="value">${tl(gelirToplam)}</div>
-        <div class="sub">ödendi işaretli</div>
+    <div class="kpis">
+      <div class="kpi good">
+        <div class="lbl">Toplam Gelen</div>
+        <div class="val">${tl(gelirToplam)}</div>
+        <div class="delta">ödendi işaretli</div>
       </div>
-      <div class="stat-card">
-        <div class="label">Toplam Giden</div>
-        <div class="value">${tl(giderToplam)}</div>
-        <div class="sub">ödendi işaretli</div>
+      <div class="kpi bad">
+        <div class="lbl">Toplam Giden</div>
+        <div class="val">${tl(giderToplam)}</div>
+        <div class="delta">ödendi işaretli</div>
       </div>
-      <div class="stat-card" style="grid-column:1 / -1;">
-        <div class="label">Net Durum</div>
-        <div class="value" style="color:${net>=0?'var(--success)':'var(--danger)'};">${tl(net)}</div>
-        <div class="sub">Aylık personel yükü: ${tl(personelToplam)}</div>
+      <div class="kpi ${net>=0?'good':'bad'}">
+        <div class="lbl">Net Durum</div>
+        <div class="val">${tl(net)}</div>
+        <div class="delta">Aylık personel yükü: ${tl(personelToplam)}</div>
       </div>
     </div>
 
@@ -1019,43 +1076,66 @@ function renderOzetGenel(){
 /* ---------------------------- DAİRELER TAB ---------------------------- */
 function renderDaireler(){
   if(!STATE.months.length){
-    return `<div class="empty">${ICON.calendar}<div><b>Önce bir ay ekleyin</b><br>Sağ alttaki + tuşuyla ilk aidat ayını (örn. Eylül) oluşturun.</div></div>`;
+    return `<div class="empty">${ICON.calendar}<div><b>Önce bir ay ekleyin</b><br>Üstteki "Yeni Ay Ekle" ile ilk aidat ayını (örn. Eylül) oluşturun.</div></div>`;
   }
   const q = STATE.search.trim().toLocaleLowerCase('tr-TR');
   const list = STATE.apartments.filter(a=>{
     if(!q) return true;
     return String(a.no).includes(q) || (a.malik||'').toLocaleLowerCase('tr-TR').includes(q);
   });
+  const recentMonths = STATE.months.slice(-3);
+  const odenmeyen = STATE.apartments.filter(a=>{
+    if(isMuaf(a)) return false;
+    const p = paymentFor(a.no,'aidat',STATE.currentMonth);
+    return !p || p.durum==='ÖDENMEDİ';
+  }).length;
+  let toplamKalan = 0;
+  STATE.apartments.forEach(a=>{ toplamKalan += computeAptBalance(a.no).kalan; });
+
   return `
-    <div class="searchbar">
-      ${ICON.search}
-      <input id="searchInput" placeholder="Daire no veya malik ara..." value="${esc(STATE.search)}" />
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Daire</div><div class="val">${STATE.apartments.length}</div></div>
+      <div class="kpi ${odenmeyen?'bad':'good'}"><div class="lbl">${monthLabel(STATE.currentMonth)} Ödemeyen</div><div class="val">${odenmeyen}</div></div>
+      <div class="kpi"><div class="lbl">Standart Aidat</div><div class="val" style="font-size:16px;">${STATE.settings.standart_aidat_tutari ? tl(STATE.settings.standart_aidat_tutari) : '—'}</div></div>
+      <div class="kpi ${toplamKalan>0?'bad':'good'}"><div class="lbl">Toplam Kalan Borç</div><div class="val">${tl(toplamKalan)}</div></div>
     </div>
-    <div class="apt-row" id="openAidatTutariBtn" style="margin-bottom:12px;">
-      <div class="report-icon">${ICON.calculator}</div>
-      <div class="apt-info">
-        <div class="name">Standart Aidat Tutarı</div>
-        <div class="kat">${STATE.settings.standart_aidat_tutari ? tl(STATE.settings.standart_aidat_tutari)+' / ay' : 'Bakiye hesaplamak için tutarı girin'}</div>
+    <div class="table-card">
+      <div class="table-card-head">
+        <h2>Aidat Takip Tablosu</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="searchInput" placeholder="Daire no veya malik ara..." value="${esc(STATE.search)}" style="border:1px solid var(--line);border-radius:7px;padding:7px 11px;font:inherit;font-size:12px;width:190px;background:var(--surface);color:var(--ink);" />
+          <button class="btn-toolbar" id="openAidatTutariBtn" type="button">${ICON.calculator} Aidat Tutarı</button>
+        </div>
       </div>
-      ${ICON.chevron}
-    </div>
-    <div class="row-list">
-      ${list.map(a=>{
-        const p = paymentFor(a.no,'aidat',STATE.currentMonth);
-        const durum = p ? p.durum : 'ÖDENMEDİ';
-        const bal = computeAptBalance(a.no);
-        return `<div class="apt-row" data-open-apt="${a.no}">
-          <div class="apt-no">${a.no}</div>
-          <div class="apt-info">
-            <div class="name">${esc(a.malik||'—')}</div>
-            <div class="kat">${esc((a.kat||'').replace('.NORMAL KAT','. Kat'))} · ${esc(durumLabel(a))}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            ${bal.muaf ? `<span class="chip odenmedi">Muaf</span>` : `<span class="apt-amount" style="color:${bal.kalan>0?'var(--danger)':'var(--success)'};">${tl(bal.kalan)}</span>`}
-            ${statusChip(durum)}
-          </div>
-        </div>`;
-      }).join('')}
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr>
+            <th>Daire</th><th>Kat</th><th>Malik / Kiracı</th>
+            ${recentMonths.map(m=>`<th class="num">${monthShort(m)}</th>`).join('')}
+            <th class="num">Kalan Borç</th><th>Durum</th>
+          </tr></thead>
+          <tbody>
+            ${list.map(a=>{
+              const p = paymentFor(a.no,'aidat',STATE.currentMonth);
+              const durum = p ? p.durum : 'ÖDENMEDİ';
+              const bal = computeAptBalance(a.no);
+              return `<tr data-open-apt="${a.no}">
+                <td class="mono">${a.no}</td>
+                <td>${esc((a.kat||'').replace('.NORMAL KAT','.Kat'))}</td>
+                <td class="name-cell">${esc(a.malik||'—')}${a.durum==='kiraci'?' <span style="color:var(--ink-dim);font-weight:400;">(kiracı)</span>':''}</td>
+                ${recentMonths.map(m=>{
+                  const mp = paymentFor(a.no,'aidat',m);
+                  const ok = mp && mp.durum==='ÖDENDİ';
+                  return `<td class="num" style="${ok?'':'color:var(--ink-dim);'}">${ok?tl(mp.tutar_odenen):'—'}</td>`;
+                }).join('')}
+                <td class="num" style="color:${bal.muaf?'var(--ink-dim)':(bal.kalan>0?'var(--danger)':'var(--success)')};">${bal.muaf?'Muaf':tl(bal.kalan)}</td>
+                <td>${statusChip(durum)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${list.length} / ${STATE.apartments.length} daire gösteriliyor</span><span>Toplam kalan borç: ${tl(toplamKalan)}</span></div>
     </div>
   `;
 }
@@ -1081,27 +1161,37 @@ function openAidatTutariSheet(){
 /* ---------------------------- GİDERLER TAB ---------------------------- */
 function renderGiderler(){
   if(!STATE.expenses.length){
-    return `<div class="empty">${ICON.receipt}<div><b>Henüz gider kaydı yok</b><br>Sağ alttaki + tuşuyla ilk faturayı ekleyin.</div></div>`;
+    return `<div class="empty">${ICON.receipt}<div><b>Henüz gider kaydı yok</b><br>Üstteki "Yeni Gider" ile ilk faturayı ekleyin.</div></div>`;
   }
   const toplam = STATE.expenses.filter(e=>e.durum==='ÖDENDİ').reduce((s,e)=>s+(Number(e.tutar)||0),0);
+  const bekleyen = STATE.expenses.filter(e=>e.durum!=='ÖDENDİ').length;
   return `
-    <div class="stat-card" style="margin-bottom:16px;">
-      <div class="label">Toplam Ödenen Gider</div>
-      <div class="value">${tl(toplam)}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Kayıt</div><div class="val">${STATE.expenses.length}</div></div>
+      <div class="kpi ${bekleyen?'warn':'good'}"><div class="lbl">Ödenmeyi Bekleyen</div><div class="val">${bekleyen}</div></div>
+      <div class="kpi good"><div class="lbl">Toplam Ödenen Gider</div><div class="val">${tl(toplam)}</div></div>
     </div>
-    <div class="row-list">
-      ${STATE.expenses.map(e=>`
-        <div class="apt-row" data-open-exp="${e.id}">
-          <div class="apt-no" style="width:auto;padding:0 10px;font-size:11px;">${esc(e.ay||'')}</div>
-          <div class="apt-info">
-            <div class="name">${esc(e.gider_turu||'—')}</div>
-            <div class="kat">${esc(e.firma||'')}${e.tarih? ' · '+new Date(e.tarih).toLocaleDateString('tr-TR'):''}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            <span class="apt-amount">${tl(e.tutar)}</span>
-            ${statusChip(e.durum)}
-          </div>
-        </div>`).join('')}
+    <div class="table-card">
+      <div class="table-card-head"><h2>Gider Kayıtları</h2></div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr>
+            <th>Ay</th><th>Gider Türü</th><th>Firma</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th>
+          </tr></thead>
+          <tbody>
+            ${STATE.expenses.map(e=>`
+              <tr data-open-exp="${e.id}">
+                <td class="mono">${esc(e.ay||'—')}</td>
+                <td class="name-cell">${esc(e.gider_turu||'—')}</td>
+                <td>${esc(e.firma||'—')}</td>
+                <td>${e.tarih? new Date(e.tarih).toLocaleDateString('tr-TR'):'—'}</td>
+                <td class="num">${tl(e.tutar)}</td>
+                <td>${statusChip(e.durum)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${STATE.expenses.length} kayıt</span><span>Toplam ödenen: ${tl(toplam)}</span></div>
     </div>
   `;
 }
@@ -1122,26 +1212,33 @@ function staffMonthsFor(){
 /* ---------------------------- GELİR TAB (ofis/inşaat) ---------------------------- */
 function renderGelir(){
   if(!STATE.gelirler.length){
-    return `<div class="empty">${ICON.box}<div><b>Henüz gelir kaydı yok</b><br>Sağ alttaki + tuşuyla ilk geliri ekleyin.</div></div>`;
+    return `<div class="empty">${ICON.box}<div><b>Henüz gelir kaydı yok</b><br>Üstteki "Yeni Gelir" ile ilk geliri ekleyin.</div></div>`;
   }
   const toplam = STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+  const bekleyen = STATE.gelirler.filter(g=>g.durum!=='ÖDENDİ').length;
   return `
-    <div class="stat-card" style="margin-bottom:16px;">
-      <div class="label">Toplam Alınan Gelir</div>
-      <div class="value">${tl(toplam)}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Kayıt</div><div class="val">${STATE.gelirler.length}</div></div>
+      <div class="kpi ${bekleyen?'warn':'good'}"><div class="lbl">Beklemede</div><div class="val">${bekleyen}</div></div>
+      <div class="kpi good"><div class="lbl">Toplam Alınan Gelir</div><div class="val">${tl(toplam)}</div></div>
     </div>
-    <div class="row-list">
-      ${STATE.gelirler.map(g=>`
-        <div class="apt-row" data-open-gelir="${g.id}">
-          <div class="apt-info">
-            <div class="name">${esc(g.aciklama||'—')}</div>
-            <div class="kat">${g.tarih? new Date(g.tarih).toLocaleDateString('tr-TR'):''}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            <span class="apt-amount">${tl(g.tutar)}</span>
-            ${statusChip(g.durum)}
-          </div>
-        </div>`).join('')}
+    <div class="table-card">
+      <div class="table-card-head"><h2>Gelir Kayıtları</h2></div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr><th>Açıklama</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+          <tbody>
+            ${STATE.gelirler.map(g=>`
+              <tr data-open-gelir="${g.id}">
+                <td class="name-cell">${esc(g.aciklama||'—')}</td>
+                <td>${g.tarih? new Date(g.tarih).toLocaleDateString('tr-TR'):'—'}</td>
+                <td class="num">${tl(g.tutar)}</td>
+                <td>${statusChip(g.durum)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${STATE.gelirler.length} kayıt</span><span>Toplam alınan: ${tl(toplam)}</span></div>
     </div>
   `;
 }
@@ -1207,26 +1304,34 @@ function openGelirSheet(id){
 
 /* ---------------------------- PERSONEL TAB ---------------------------- */
 function renderPersonel(){
+  if(!STATE.staff.length){
+    return `<div class="empty">${ICON.users}<div><b>Henüz personel kaydı yok</b><br>Üstteki "Yeni Personel" ile ilk kaydı ekleyin.</div></div>`;
+  }
   const toplam = STATE.staff.reduce((s,p)=>s+(Number(p.aylik_ucret)||0),0);
   return `
-    <div class="stat-card" style="margin-bottom:16px;">
-      <div class="label">Toplam Aylık Ücret (bilinen)</div>
-      <div class="value">${tl(toplam)}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Personel</div><div class="val">${STATE.staff.length}</div></div>
+      <div class="kpi good"><div class="lbl">Toplam Aylık Ücret (bilinen)</div><div class="val">${tl(toplam)}</div></div>
     </div>
-    <div class="row-list">
-      ${STATE.staff.map(p=>{
-        const thisMonthPay = STATE.currentMonth ? STATE.staffPayments.find(sp=>sp.staff_id===p.id && sp.ay===STATE.currentMonth) : null;
-        return `<div class="apt-row" data-open-staff="${p.id}">
-          <div class="apt-info">
-            <div class="name">${p.isim ? esc(p.isim) : esc(p.gorev)}</div>
-            <div class="kat">${p.isim ? esc(p.gorev) : 'İsim girilmedi'}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-            <span class="apt-amount">${tl(p.aylik_ucret)}</span>
-            ${thisMonthPay ? statusChip(thisMonthPay.durum) : (STATE.currentMonth? statusChip('ÖDENMEDİ'):'')}
-          </div>
-        </div>`;
-      }).join('')}
+    <div class="table-card">
+      <div class="table-card-head"><h2>Personel Listesi</h2></div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr><th>İsim</th><th>Görev</th><th class="num">Aylık Ücret</th><th>${STATE.currentMonth? monthLabel(STATE.currentMonth)+' Durumu' : 'Bu Ay'}</th></tr></thead>
+          <tbody>
+            ${STATE.staff.map(p=>{
+              const thisMonthPay = STATE.currentMonth ? STATE.staffPayments.find(sp=>sp.staff_id===p.id && sp.ay===STATE.currentMonth) : null;
+              return `<tr data-open-staff="${p.id}">
+                <td class="name-cell">${p.isim ? esc(p.isim) : esc(p.gorev)}</td>
+                <td>${p.isim ? esc(p.gorev) : '—'}</td>
+                <td class="num">${tl(p.aylik_ucret)}</td>
+                <td>${thisMonthPay ? statusChip(thisMonthPay.durum) : (STATE.currentMonth? statusChip('ÖDENMEDİ'):'—')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${STATE.staff.length} personel</span><span>Toplam aylık ücret: ${tl(toplam)}</span></div>
     </div>
   `;
 }
