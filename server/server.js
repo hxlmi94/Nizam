@@ -10,6 +10,14 @@ import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
+// node-postgres, hassasiyet kaybı olmasın diye bigint (id sütunları) ve
+// numeric (tutar sütunları) değerlerini varsayılan olarak METİN (string) döner
+// — Supabase'in eski davranışıyla (bunları sayı olarak dönüyordu) birebir
+// aynı olsun ve arayüzdeki id/id karşılaştırmaları ve tutar hesapları
+// bozulmasın diye burada sayıya çeviriyoruz.
+pg.types.setTypeParser(20, (val) => (val === null ? null : parseInt(val, 10))); // int8 / bigint
+pg.types.setTypeParser(1700, (val) => (val === null ? null : parseFloat(val))); // numeric
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -39,7 +47,7 @@ const CHAT_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '12mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ------------------------------------------------------------------
@@ -107,13 +115,20 @@ app.get('/api/data', requireAuth, async (req, res) => {
   try {
     const isletmeId = Number(req.query.isletme_id);
     if (!isletmeId) return res.status(400).json({ error: 'isletme_id gerekli' });
-    const [a, p, e, s, mi, g] = await Promise.all([
+    const [a, p, e, s, mi, g, c, pr] = await Promise.all([
       q('select * from apartments where isletme_id = $1 order by no', [isletmeId]),
       q('select * from payments where isletme_id = $1', [isletmeId]),
       q('select * from expenses where isletme_id = $1 order by id desc', [isletmeId]),
       q('select * from staff where isletme_id = $1 order by id', [isletmeId]),
       q('select * from maintenance_items where isletme_id = $1 order by id', [isletmeId]),
       q('select * from gelirler where isletme_id = $1 order by id desc', [isletmeId]),
+      q(
+        `select id, isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni,
+                belge_ad, belge_tip, (belge_data is not null) as has_belge, proje_id, created_at
+         from contracts where isletme_id = $1 order by id desc`,
+        [isletmeId]
+      ),
+      q('select * from projeler where isletme_id = $1 order by id desc', [isletmeId]),
     ]);
     // staff_payments'in kendi isletme_id'si yok (staff_id üzerinden bağlı) — bu işletmenin
     // personel id'lerine göre ayrıca filtrele.
@@ -131,6 +146,8 @@ app.get('/api/data', requireAuth, async (req, res) => {
       staffPayments,
       maintenanceItems: mi.rows,
       gelirler: g.rows,
+      contracts: c.rows,
+      projeler: pr.rows,
     });
   } catch (err) {
     console.error(err);
@@ -219,11 +236,11 @@ app.post('/api/months', requireAuth, async (req, res) => {
 // ------------------------------------------------------------------
 app.post('/api/gelirler', requireAuth, async (req, res) => {
   try {
-    const { isletme_id, aciklama, tutar, tarih, durum, not_metni } = req.body || {};
+    const { isletme_id, aciklama, tutar, tarih, durum, not_metni, proje_id } = req.body || {};
     const { rows } = await q(
-      `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, not_metni)
-       values ($1, $2, $3, $4, $5, $6) returning *`,
-      [isletme_id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null]
+      `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, not_metni, proje_id)
+       values ($1, $2, $3, $4, $5, $6, $7) returning *`,
+      [isletme_id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -234,11 +251,11 @@ app.post('/api/gelirler', requireAuth, async (req, res) => {
 
 app.put('/api/gelirler/:id', requireAuth, async (req, res) => {
   try {
-    const { aciklama, tutar, tarih, durum, not_metni } = req.body || {};
+    const { aciklama, tutar, tarih, durum, not_metni, proje_id } = req.body || {};
     const { rows } = await q(
-      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, not_metni = $6
+      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, not_metni = $6, proje_id = $7
        where id = $1 returning *`,
-      [req.params.id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null]
+      [req.params.id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -258,6 +275,162 @@ app.delete('/api/gelirler/:id', requireAuth, async (req, res) => {
 });
 
 // ------------------------------------------------------------------
+// Kontratlar (ofis/inşaat gibi 'genel' tipi işletmelerde — satılık/kiralık kontrat takibi)
+// ------------------------------------------------------------------
+const CONTRACT_RETURNING = `id, isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni,
+  belge_ad, belge_tip, (belge_data is not null) as has_belge, proje_id, created_at`;
+
+app.post('/api/contracts', requireAuth, async (req, res) => {
+  try {
+    const { isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, proje_id } = req.body || {};
+    if (!isletme_id) return res.status(400).json({ error: 'isletme_id gerekli' });
+    const { rows } = await q(
+      `insert into contracts (isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, proje_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       returning ${CONTRACT_RETURNING}`,
+      [
+        isletme_id,
+        mulk_adi ?? null,
+        tip === 'kiralik' ? 'kiralik' : 'satilik',
+        karsi_taraf ?? null,
+        tutar ?? null,
+        baslangic_tarihi ?? null,
+        bitis_tarihi ?? null,
+        ['aktif', 'tamamlandi', 'gelecek'].includes(durum) ? durum : 'aktif',
+        not_metni ?? null,
+        belge_ad ?? null,
+        belge_tip ?? null,
+        belge_data ?? null,
+        proje_id ?? null,
+      ]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/contracts/:id', requireAuth, async (req, res) => {
+  try {
+    const { mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, remove_belge, proje_id } = req.body || {};
+    const { rows } = await q(
+      `update contracts set
+         mulk_adi = $2,
+         tip = $3,
+         karsi_taraf = $4,
+         tutar = $5,
+         baslangic_tarihi = $6,
+         bitis_tarihi = $7,
+         durum = $8,
+         not_metni = $9,
+         belge_ad = case when $10::boolean then null when $11::text is not null then $11 else belge_ad end,
+         belge_tip = case when $10::boolean then null when $12::text is not null then $12 else belge_tip end,
+         belge_data = case when $10::boolean then null when $13::text is not null then $13 else belge_data end,
+         proje_id = $14
+       where id = $1
+       returning ${CONTRACT_RETURNING}`,
+      [
+        req.params.id,
+        mulk_adi ?? null,
+        tip === 'kiralik' ? 'kiralik' : 'satilik',
+        karsi_taraf ?? null,
+        tutar ?? null,
+        baslangic_tarihi ?? null,
+        bitis_tarihi ?? null,
+        ['aktif', 'tamamlandi', 'gelecek'].includes(durum) ? durum : 'aktif',
+        not_metni ?? null,
+        !!remove_belge,
+        belge_ad ?? null,
+        belge_tip ?? null,
+        belge_data ?? null,
+        proje_id ?? null,
+      ]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// Projeler (bir şirketin içindeki inşaat/mimarlık projeleri — gelir, gider ve
+// kontrat kayıtları isteğe bağlı olarak bir projeye etiketlenebilir; etiketlenmeyenler
+// "Ofis Geneli" sayılır)
+// ------------------------------------------------------------------
+app.post('/api/projeler', requireAuth, async (req, res) => {
+  try {
+    const { isletme_id, ad, aciklama, durum } = req.body || {};
+    if (!isletme_id || !ad) return res.status(400).json({ error: 'isletme_id ve ad gerekli' });
+    const { rows } = await q(
+      `insert into projeler (isletme_id, ad, aciklama, durum)
+       values ($1, $2, $3, $4) returning *`,
+      [isletme_id, ad, aciklama ?? null, ['aktif', 'tamamlandi', 'beklemede'].includes(durum) ? durum : 'aktif']
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/projeler/:id', requireAuth, async (req, res) => {
+  try {
+    const { ad, aciklama, durum } = req.body || {};
+    const { rows } = await q(
+      `update projeler set
+         ad = coalesce($2, ad),
+         aciklama = $3,
+         durum = coalesce($4, durum)
+       where id = $1 returning *`,
+      [req.params.id, ad ?? null, aciklama ?? null, ['aktif', 'tamamlandi', 'beklemede'].includes(durum) ? durum : null]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/projeler/:id', requireAuth, async (req, res) => {
+  try {
+    // Bu projeye bağlı gelir/gider/kontrat kayıtları silinmez, sadece "Ofis Geneli"ne geri döner.
+    await q('delete from projeler where id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/contracts/:id', requireAuth, async (req, res) => {
+  try {
+    await q('delete from contracts where id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Belge (sözleşme PDF/fotoğrafı) indirme/görüntüleme — base64 olarak saklanan içeriği ham dosya olarak döner
+app.get('/api/contracts/:id/belge', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await q('select belge_ad, belge_tip, belge_data from contracts where id = $1', [req.params.id]);
+    const row = rows[0];
+    if (!row || !row.belge_data) return res.status(404).json({ error: 'Belge bulunamadı' });
+    const buffer = Buffer.from(row.belge_data, 'base64');
+    res.set('Content-Type', row.belge_tip || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename="${(row.belge_ad || 'belge').replace(/"/g, '')}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
 // Giderler
 // ------------------------------------------------------------------
 // Bir gider kaydı "ÖDENDİ" olarak bir bakım kalemine bağlıysa,
@@ -270,11 +443,11 @@ async function syncMaintenanceFromExpense(expense) {
 
 app.post('/api/expenses', requireAuth, async (req, res) => {
   try {
-    const { isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id } = req.body || {};
+    const { isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id } = req.body || {};
     const { rows } = await q(
-      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning *`,
-      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null]
+      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning *`,
+      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null]
     );
     await syncMaintenanceFromExpense(rows[0]);
     res.json(rows[0]);
@@ -286,11 +459,11 @@ app.post('/api/expenses', requireAuth, async (req, res) => {
 
 app.put('/api/expenses/:id', requireAuth, async (req, res) => {
   try {
-    const { ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id } = req.body || {};
+    const { ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id } = req.body || {};
     const { rows } = await q(
-      `update expenses set ay = $2, gider_turu = $3, firma = $4, tutar = $5, tarih = $6, durum = $7, not_metni = $8, bakim_id = $9
+      `update expenses set ay = $2, gider_turu = $3, firma = $4, tutar = $5, tarih = $6, durum = $7, not_metni = $8, bakim_id = $9, proje_id = $10
        where id = $1 returning *`,
-      [req.params.id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null]
+      [req.params.id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null]
     );
     await syncMaintenanceFromExpense(rows[0]);
     res.json(rows[0]);
@@ -495,20 +668,33 @@ Yöneticiye aidat, demirbaş, fatura/gider, personel takibi ve site muhasebesiyl
 
 Her zaman Türkçe, kısa ve net cevaplar ver. Kesin hukuki veya vergisel sonucu olan konularda (ceza, dava süreci, vergi mükellefiyeti gibi) genel bilgi verebilirsin ama bunun bağlayıcı hukuki/mali tavsiye olmadığını, kesinleşmesi gereken konularda bir mali müşavir veya avukata danışılmasını belirt. Aşağıda uygulamanın güncel veri özeti var, sorular buna göre yanıtlanabilir; ama tam liste/detay gerekiyorsa yöneticiye uygulama içindeki ilgili sekmeye bakmasını söyle (elinde satır satır veri yok, sadece bu özet var).\n\nGÜNCEL DURUM:\n${context}`;
     } else {
-      const [{ rows: gelirler }, { rows: expenses }] = await Promise.all([
+      const [{ rows: gelirler }, { rows: expenses }, { rows: contracts }, { rows: projeler }] = await Promise.all([
         q('select * from gelirler where isletme_id = $1', [isletme_id]),
         q('select * from expenses where isletme_id = $1', [isletme_id]),
+        q('select mulk_adi, tip, karsi_taraf, tutar, durum, proje_id from contracts where isletme_id = $1', [isletme_id]),
+        q('select id, ad, durum from projeler where isletme_id = $1', [isletme_id]),
       ]);
       const gelirToplam = (gelirler || []).filter((g) => g.durum === 'ÖDENDİ').reduce((s, g) => s + (Number(g.tutar) || 0), 0);
       const giderToplam = (expenses || []).filter((e) => e.durum === 'ÖDENDİ').reduce((s, e) => s + (Number(e.tutar) || 0), 0);
+      const aktifKontrat = (contracts || []).filter((k) => k.durum === 'aktif');
+      const satilikSayisi = (contracts || []).filter((k) => k.tip === 'satilik').length;
+      const kiralikSayisi = (contracts || []).filter((k) => k.tip === 'kiralik').length;
+
+      const projeSatirlari = (projeler || []).map((proje) => {
+        const pg = (gelirler || []).filter((g) => g.proje_id === proje.id && g.durum === 'ÖDENDİ').reduce((s, g) => s + (Number(g.tutar) || 0), 0);
+        const pe = (expenses || []).filter((e) => e.proje_id === proje.id && e.durum === 'ÖDENDİ').reduce((s, e) => s + (Number(e.tutar) || 0), 0);
+        return `- ${proje.ad} (${proje.durum}): gelir ${pg.toLocaleString('tr-TR')} ₺, gider ${pe.toLocaleString('tr-TR')} ₺, net ${(pg - pe).toLocaleString('tr-TR')} ₺`;
+      }).join('\n');
 
       context = `
 Toplam gelen para (ödendi işaretli): ${gelirToplam.toLocaleString('tr-TR')} ₺
 Toplam ödenen gider: ${giderToplam.toLocaleString('tr-TR')} ₺
 Net durum: ${(gelirToplam - giderToplam).toLocaleString('tr-TR')} ₺
+Toplam kontrat sayısı: ${(contracts || []).length} (Satılık: ${satilikSayisi}, Kiralık: ${kiralikSayisi}, Aktif: ${aktifKontrat.length})
+${projeler && projeler.length ? `\nProjeler (${projeler.length} adet):\n${projeSatirlari}` : ''}
 `.trim();
 
-      system = `Sen "${isletmeAdi}" işletmesinin (ofis veya inşaat projesi olabilir) muhasebe asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi hakkında sorulara yardımcı ol. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nGÜNCEL DURUM:\n${context}`;
+      system = `Sen "${isletmeAdi}" işletmesinin (ofis, inşaat veya gayrimenkul projesi olabilir) muhasebe ve iş takibi asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi, satılık/kiralık kontrat durumu hakkında sorulara yardımcı ol. Uygulamada "Kontratlar" sekmesinde satılık/kiralık mülk kontratlarının (karşı taraf, tutar, tarih, durum, belge) tutulduğunu, "Projeler" sekmesinde ise şirketin birden fazla inşaat/mimarlık projesinin her birinin kendi gelir-gider-kontrat kayıtlarıyla ayrı takip edildiğini, projeye bağlanmayan kayıtların "Ofis Geneli" sayıldığını biliyorsun; ilgili sorularda oraya yönlendirebilirsin. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nGÜNCEL DURUM:\n${context}`;
     }
 
     const msg = await anthropic.messages.create({
