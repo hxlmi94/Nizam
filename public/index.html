@@ -946,8 +946,8 @@ function statusChip(durum){
   const meta = STATUS_META[durum] || {chip:'odenmedi', label:durum||'—'};
   return `<span class="chip ${meta.chip}">${meta.label}</span>`;
 }
-
-/* ---------------------------- PROJE HELPERS (gelir/gider/kontrat'ı bir projeye etiketleme) ---------------------------- */// proje_id boş/null ise kayıt "Ofis Geneli" sayılır (belirli bir inşaat/mimarlık projesine ait değildir).
+/* ---------------------------- PROJE HELPERS (gelir/gider/kontrat'ı bir projeye etiketleme) ---------------------------- */
+// proje_id boş/null ise kayıt "Ofis Geneli" sayılır (belirli bir inşaat/mimarlık projesine ait değildir).
 function projeAdi(projeId){
   if(!projeId) return 'Ofis Geneli';
   const p = STATE.projeler.find(x=>x.id===projeId);
@@ -1768,21 +1768,29 @@ function renderPersonel(){
 }
 
 /* ---------------------------- ASİSTAN TAB ---------------------------- */
-const CHAT_SUGGESTIONS = [
-  'Bu ay kimler ödemedi?',
-  'Toplam gider ne kadar?',
-  'Kontrol edilmesi gereken kayıt var mı?',
-];
+function chatSuggestions(){
+  if(isSiteTipi()) return [
+    'Bu ay kimler ödemedi?',
+    'Toplam gider ne kadar?',
+    'Kontrol edilmesi gereken kayıt var mı?',
+  ];
+  return [
+    'Toplam gelir ve gider ne kadar?',
+    'Aktif kontrat sayısı kaç?',
+    '500 TL elektrik gideri ekle',
+  ];
+}
 
 function renderAsistan(){
   const hasMsgs = STATE.chat.length>0;
+  const asistanBaslik = esc(currentIsletme()?.ad || 'İşletme') + ' Asistanı';
   return `
     <div class="chat-wrap">
       <div class="chat-log" id="chatLog">
-        ${!hasMsgs ? `<div class="empty" style="padding-top:30px;">${ICON.chat}<div><b>Zeytinkule Asistanı</b><br>Aidat, gider ve personel durumu hakkında sorular sorabilirsin.</div></div>` : ''}
+        ${!hasMsgs ? `<div class="empty" style="padding-top:30px;">${ICON.chat}<div><b>${asistanBaslik}</b><br>${isSiteTipi() ? 'Aidat, gider ve personel durumu hakkında sorular sorabilir, gider ekleyebilirsin.' : 'Gelir, gider, kontrat ve proje durumu hakkında sorular sorabilir; "500 TL elektrik gideri ekle" gibi yazarak doğrudan kayıt ekletebilirsin.'}</div></div>` : ''}
         ${STATE.chat.map(m=>`<div class="msg ${m.role==='user'?'user':'bot'}">${esc(m.content)}</div>`).join('')}
       </div>
-      ${!hasMsgs ? `<div class="chat-suggest">${CHAT_SUGGESTIONS.map(s=>`<button type="button" data-suggest="${esc(s)}">${s}</button>`).join('')}</div>` : ''}
+      ${!hasMsgs ? `<div class="chat-suggest">${chatSuggestions().map(s=>`<button type="button" data-suggest="${esc(s)}">${s}</button>`).join('')}</div>` : ''}
       <div class="chat-input-bar">
         <input id="chatInput" placeholder="Bir şey sor..." autocomplete="off" />
         <button id="chatSendBtn">${ICON.send}</button>
@@ -1819,6 +1827,9 @@ async function sendChat(text){
     const history = STATE.chat.slice(0,-1).map(m=>({role:m.role, content:m.content}));
     const data = await api('/api/chat', {method:'POST', body:{message:text, history, isletme_id:STATE.currentIsletmeId}});
     STATE.chat.push({role:'assistant', content:data.response});
+    if(data.changed){
+      await loadAll();
+    }
   }catch(err){
     STATE.chat.push({role:'assistant', content:'Bir hata oldu: '+err.message});
   }
