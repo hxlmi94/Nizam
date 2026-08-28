@@ -448,6 +448,29 @@ function tl(n){
   if(n===null||n===undefined||n==='') return '—';
   return Number(n).toLocaleString('tr-TR',{maximumFractionDigits:0})+' ₺';
 }
+// Tutar giriş kutularından gelen metni Türkçe biçime göre sayıya çevirir.
+// "30.000" -> 30000 (nokta binlik ayırıcı), "30.000,50" -> 30000.5 (virgül ondalık),
+// "30,5" -> 30.5, "30.5" -> 30.5 (tek haneli/iki haneli nokta sonrası ondalık sayılır).
+function parseTLInput(str){
+  if(str===null||str===undefined) return null;
+  str = String(str).trim().replace(/\s/g,'');
+  if(str==='') return null;
+  if(str.includes(',')){
+    str = str.replace(/\./g,'').replace(',', '.');
+  } else {
+    const dotCount = (str.match(/\./g)||[]).length;
+    if(dotCount>1){
+      str = str.replace(/\./g,'');
+    } else if(dotCount===1){
+      const parts = str.split('.');
+      if(parts[1] && parts[1].length===3){
+        str = parts[0]+parts[1];
+      }
+    }
+  }
+  const n = Number(str);
+  return isNaN(n) ? null : n;
+}
 function esc(s){ return (s===null||s===undefined) ? '' : String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function todayISO(){ const d=new Date(); return d.toISOString().slice(0,10); }
 function nowMonth(){ const d=new Date(); return d.toISOString().slice(0,7); }
@@ -946,7 +969,7 @@ function statusChip(durum){
   const meta = STATUS_META[durum] || {chip:'odenmedi', label:durum||'—'};
   return `<span class="chip ${meta.chip}">${meta.label}</span>`;
 }
-/* ---------------------------- PROJE HELPERS (gelir/gider/kontrat'ı bir projeye etiketleme) ---------------------------- */
+  /* ---------------------------- PROJE HELPERS (gelir/gider/kontrat'ı bir projeye etiketleme) ---------------------------- */
 // proje_id boş/null ise kayıt "Ofis Geneli" sayılır (belirli bir inşaat/mimarlık projesine ait değildir).
 function projeAdi(projeId){
   if(!projeId) return 'Ofis Geneli';
@@ -1198,13 +1221,13 @@ function openAidatTutariSheet(){
       <button class="close" data-close-sheet>${ICON.x}</button>
     </div>
     <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">Her daireden her ay istenen standart aidat tutarını girin. Daire bakiyeleri (kalan borç) buna göre hesaplanır. Aidattan muaf daireler bu hesaba hiç dahil edilmez.</p>
-    <div class="field"><label>Aylık Aidat Tutarı (₺)</label><input type="number" inputmode="decimal" id="aidatTutariInput" value="${STATE.settings.standart_aidat_tutari||''}" /></div>
+    <div class="field"><label>Aylık Aidat Tutarı (₺)</label><input type="text" inputmode="decimal" id="aidatTutariInput" value="${STATE.settings.standart_aidat_tutari||''}" /></div>
     <button class="btn btn-primary btn-block" id="aidatTutariSave">Kaydet</button>
   `;
   openSheet(html);
   document.getElementById('aidatTutariSave').onclick = async ()=>{
     const v = document.getElementById('aidatTutariInput').value;
-    await saveSetting('standart_aidat_tutari', v===''?null:Number(v));
+    await saveSetting('standart_aidat_tutari', parseTLInput(v));
     closeSheet(); showToast('Kaydedildi'); renderMain();
   };
 }
@@ -1305,7 +1328,7 @@ function openGelirSheet(id, presetProjeId){
     </div>
     <div class="field"><label>Açıklama</label><input id="g_aciklama" value="${esc(g?.aciklama||'')}" placeholder="örn. Ortak ödemesi, 3 nolu daire satışı, ofis kirası..." /></div>
     ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="g_proje">${projeSelectHtml(g?g.proje_id:presetProjeId)}</select></div>` : ''}
-    <div class="field"><label>Tutar (₺)</label><input id="g_tutar" type="number" inputmode="decimal" value="${g?.tutar??''}" /></div>
+    <div class="field"><label>Tutar (₺)</label><input id="g_tutar" type="text" inputmode="decimal" value="${g?.tutar??''}" /></div>
     <div class="field"><label>Tarih</label><input id="g_tarih" type="date" value="${g?.tarih||''}" /></div>
     <div class="field"><label>Durum</label>
       <div class="seg">
@@ -1333,7 +1356,7 @@ function openGelirSheet(id, presetProjeId){
     const payload = {
       isletme_id: STATE.currentIsletmeId,
       aciklama: document.getElementById('g_aciklama').value || null,
-      tutar: document.getElementById('g_tutar').value===''?null:Number(document.getElementById('g_tutar').value),
+      tutar: parseTLInput(document.getElementById('g_tutar').value),
       tarih: document.getElementById('g_tarih').value || null,
       durum,
       not_metni: document.getElementById('g_not').value || null,
@@ -1439,7 +1462,7 @@ function openContractSheet(id, presetProjeId){
       </div>
     </div>
     <div class="field"><label>Karşı Taraf (Alıcı / Kiracı)</label><input id="k_karsi" value="${esc(k?.karsi_taraf||'')}" placeholder="örn. Ahmet Yılmaz" /></div>
-    <div class="field"><label>Tutar (₺)</label><input id="k_tutar" type="number" inputmode="decimal" value="${k?.tutar??''}" /></div>
+    <div class="field"><label>Tutar (₺)</label><input id="k_tutar" type="text" inputmode="decimal" value="${k?.tutar??''}" /></div>
     <div class="field"><label>Başlangıç Tarihi</label><input id="k_baslangic" type="date" value="${k?.baslangic_tarihi||''}" /></div>
     <div class="field"><label>Bitiş Tarihi (varsa)</label><input id="k_bitis" type="date" value="${k?.bitis_tarihi||''}" /></div>
     <div class="field"><label>Durum</label>
@@ -1503,7 +1526,7 @@ function openContractSheet(id, presetProjeId){
       mulk_adi: document.getElementById('k_mulk').value || null,
       tip,
       karsi_taraf: document.getElementById('k_karsi').value || null,
-      tutar: document.getElementById('k_tutar').value===''?null:Number(document.getElementById('k_tutar').value),
+      tutar: parseTLInput(document.getElementById('k_tutar').value),
       baslangic_tarihi: document.getElementById('k_baslangic').value || null,
       bitis_tarihi: document.getElementById('k_bitis').value || null,
       durum,
@@ -1908,7 +1931,7 @@ function closeSheet(){
 document.addEventListener('click', (e)=>{
   if(e.target.closest('[data-close-sheet]')) closeSheet();
 });
-/* ---------------------------- DAİRE DETAY SHEET ---------------------------- */
+  /* ---------------------------- DAİRE DETAY SHEET ---------------------------- */
 function periodRowsForApartment(no){
   const rows = [];
   const dem = paymentFor(no,'demirbas','tek');
@@ -2006,7 +2029,7 @@ function periodEditBlock(no, r){
       ${statuses.map(s=>`<button type="button" data-status="${s}" class="${s===durum?'on '+meta[s].chip:''}">${meta[s].label}</button>`).join('')}
     </div>
     <div style="display:flex;gap:8px;margin-top:10px;">
-      <input type="number" inputmode="decimal" data-role="tutar" placeholder="Tutar (₺)" value="${tutar!==null&&tutar!==undefined?tutar:''}" style="flex:1;border:1px solid var(--line);background:var(--surface-2);border-radius:11px;padding:10px 11px;font:inherit;color:var(--ink);" />
+      <input type="text" inputmode="decimal" data-role="tutar" placeholder="Tutar (₺)" value="${tutar!==null&&tutar!==undefined?tutar:''}" style="flex:1;border:1px solid var(--line);background:var(--surface-2);border-radius:11px;padding:10px 11px;font:inherit;color:var(--ink);" />
       <button type="button" class="btn btn-primary" data-role="save" style="flex:none;">Kaydet</button>
     </div>
     ${row && row.not_metni ? `<div style="font-size:11.5px;color:var(--ink-dim);margin-top:8px;">${esc(row.not_metni)}</div>`:''}
@@ -2028,7 +2051,7 @@ function wirePeriodBlocks(no){
       const [tur,donem] = block.dataset.period.split('|');
       const status = block.dataset.pendingStatus || seg.querySelector('button.on')?.dataset.status || 'ÖDENMEDİ';
       const tutarVal = block.querySelector('[data-role="tutar"]').value;
-      await savePayment(no, tur, donem, status, tutarVal===''?null:Number(tutarVal));
+      await savePayment(no, tur, donem, status, parseTLInput(tutarVal));
     };
   });
 }
@@ -2101,7 +2124,7 @@ function openExpenseSheet(id, presetProjeId){
       <input id="f_firma_yeni" placeholder="Yeni firma adı" value="${esc(currentFirma && !firmalar.includes(currentFirma) ? currentFirma : '')}" style="margin-top:8px;${currentFirma && !firmalar.includes(currentFirma) ? '' : 'display:none;'}" />
       <div id="f_firma_not" style="font-size:11.5px;color:var(--ink-dim);margin-top:6px;${currentFirma && firmalar.includes(currentFirma) ? '' : 'display:none;'}"></div>
     </div>
-    <div class="field"><label>Tutar (₺)</label><input id="f_tutar" type="number" inputmode="decimal" value="${e?.tutar??''}" /></div>
+    <div class="field"><label>Tutar (₺)</label><input id="f_tutar" type="text" inputmode="decimal" value="${e?.tutar??''}" /></div>
     <div class="field"><label>Ödeme Tarihi</label><input id="f_tarih" type="date" value="${e?.tarih||''}" /></div>
     <div class="field"><label>Durum</label>
       <div class="seg">
@@ -2184,7 +2207,7 @@ function openExpenseSheet(id, presetProjeId){
       ay: document.getElementById('f_ay').value || null,
       gider_turu: document.getElementById('f_tur').value || null,
       firma,
-      tutar: document.getElementById('f_tutar').value===''?null:Number(document.getElementById('f_tutar').value),
+      tutar: parseTLInput(document.getElementById('f_tutar').value),
       tarih: document.getElementById('f_tarih').value || null,
       durum,
       bakim_id,
@@ -2240,7 +2263,7 @@ function openStaffSheet(id){
     </div>
     <div class="field"><label>İsim</label><input id="s_isim" value="${esc(p?.isim||'')}" placeholder="örn. Ahmet Yılmaz" /></div>
     <div class="field"><label>Görev</label><input id="s_gorev" value="${esc(p?.gorev||'')}" placeholder="örn. Gece Güvenlik" /></div>
-    <div class="field"><label>Aylık Ücret (₺)</label><input id="s_ucret" type="number" inputmode="decimal" value="${p?.aylik_ucret??''}" /></div>
+    <div class="field"><label>Aylık Ücret (₺)</label><input id="s_ucret" type="text" inputmode="decimal" value="${p?.aylik_ucret??''}" /></div>
     <button class="btn btn-primary btn-block" id="saveStaffBtn">Kaydet</button>
     ${p ? `<div class="divider"></div><div class="section-title" style="margin-top:0;">Aylık Ödeme Durumu</div>${monthBlocks || '<p style="color:var(--ink-dim);font-size:13px;">Henüz ay eklenmedi.</p>'}` : ''}
   `;
@@ -2250,7 +2273,7 @@ function openStaffSheet(id){
       isletme_id: STATE.currentIsletmeId,
       isim: document.getElementById('s_isim').value || null,
       gorev: document.getElementById('s_gorev').value || null,
-      aylik_ucret: document.getElementById('s_ucret').value===''?null:Number(document.getElementById('s_ucret').value),
+      aylik_ucret: parseTLInput(document.getElementById('s_ucret').value),
     };
     try{
       const data = p
@@ -2693,8 +2716,8 @@ function openIsletmeProjesiSheet(){
     </div>
     <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">Kat Mülkiyeti Kanunu'na göre; personel gibi ortak hizmet giderleri dairelere eşit, diğer giderler ise dairenin alanı oranında dağıtılır. Tutarları girip hesaplayın.</p>
 
-    <div class="field"><label>Aylık Personel Gideri (eşit dağıtılır)</label><input type="number" inputmode="decimal" id="ip_personel" value="${staffToplam||''}" /></div>
-    <div class="field"><label>Aylık Diğer Sabit Giderler (elektrik, su, asansör bakımı, sigorta vb. — alan oranında dağıtılır)</label><input type="number" inputmode="decimal" id="ip_diger" placeholder="0" /></div>
+    <div class="field"><label>Aylık Personel Gideri (eşit dağıtılır)</label><input type="text" inputmode="decimal" id="ip_personel" value="${staffToplam||''}" /></div>
+    <div class="field"><label>Aylık Diğer Sabit Giderler (elektrik, su, asansör bakımı, sigorta vb. — alan oranında dağıtılır)</label><input type="text" inputmode="decimal" id="ip_diger" placeholder="0" /></div>
     <div class="field" style="margin-bottom:6px;"><label>Yedek Akçe Oranı (%)</label><input type="number" inputmode="decimal" id="ip_yedek" value="10" /></div>
     <p style="color:var(--ink-dim);font-size:11px;margin:0 0 14px;">Not: Yedek akçe genellikle yıllık gider toplamının %10'unu aşmayacak şekilde belirlenir. Kesin oran için mali müşavirinize danışın.</p>
     <button class="btn btn-gold btn-block" id="ip_hesapla">Hesapla</button>
@@ -2703,8 +2726,8 @@ function openIsletmeProjesiSheet(){
   openSheet(html);
   document.getElementById('backToHub').onclick = openReportsHub;
   document.getElementById('ip_hesapla').onclick = ()=>{
-    const personel = Number(document.getElementById('ip_personel').value)||0;
-    const diger = Number(document.getElementById('ip_diger').value)||0;
+    const personel = parseTLInput(document.getElementById('ip_personel').value)||0;
+    const diger = parseTLInput(document.getElementById('ip_diger').value)||0;
     const yedekOran = Number(document.getElementById('ip_yedek').value)||0;
     const araToplam = personel + diger;
     const yedek = araToplam * (yedekOran/100);
