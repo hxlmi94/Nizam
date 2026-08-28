@@ -614,6 +614,70 @@ app.put('/api/settings/:key', requireAuth, async (req, res) => {
 });
 
 // ------------------------------------------------------------------
+// Sohbet asistanının kayıt ekleyebildiği araçlar (tool use) — kullanıcı
+// "500 TL elektrik gideri ekle" gibi bir şey yazınca asistan bunu gerçekten
+// veritabanına ekleyebilsin diye tanımlanır.
+// ------------------------------------------------------------------
+const CHAT_TOOL_ADD_EXPENSE = {
+  name: 'gider_ekle',
+  description:
+    'Yeni bir gider (fatura, ödeme, harcama) kaydı ekler. Kullanıcı bir gider/harcama/fatura eklemeni istediğinde bu aracı kullan.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      gider_turu: { type: 'string', description: 'Gider türü/açıklaması, örn. Elektrik, Su, Malzeme, Nakliye, Personel vb.' },
+      firma: { type: 'string', description: 'Ödeme yapılan firma/abone/tedarikçi adı (biliniyorsa, yoksa boş bırak)' },
+      tutar: { type: 'number', description: 'Tutar (TL, sayı olarak)' },
+      tarih: { type: 'string', description: 'Tarih, YYYY-MM-DD formatında. Kullanıcı belirtmemişse bugünün tarihini kullan.' },
+      ay: { type: 'string', description: 'Ay adı büyük harfle, örn. EYLÜL (opsiyonel)' },
+      durum: { type: 'string', enum: ['ÖDENDİ', 'ÖDENMEDİ'], description: 'Ödeme durumu, belirtilmemişse ÖDENMEDİ kullan' },
+      proje_id: { type: 'number', description: 'Eğer belirli bir projeye/inşaata aitse o projenin id numarası; genel ofis gideriyse boş bırak' },
+      not_metni: { type: 'string', description: 'Ek not (opsiyonel)' },
+    },
+    required: ['tutar'],
+  },
+};
+const CHAT_TOOL_ADD_INCOME = {
+  name: 'gelir_ekle',
+  description: 'Yeni bir gelir kaydı ekler (para geldiğinde/tahsilat olduğunda). Sadece ofis/inşaat tipi işletmelerde kullanılır.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      aciklama: { type: 'string', description: 'Gelirin açıklaması, örn. "3 nolu daire satışı", "ofis kirası"' },
+      tutar: { type: 'number', description: 'Tutar (TL, sayı olarak)' },
+      tarih: { type: 'string', description: 'Tarih, YYYY-MM-DD formatında. Belirtilmemişse bugünün tarihini kullan.' },
+      durum: { type: 'string', enum: ['ÖDENDİ', 'ÖDENMEDİ'], description: 'Belirtilmemişse ÖDENDİ kullan (para geldiyse)' },
+      proje_id: { type: 'number', description: 'Eğer belirli bir projeye/inşaata aitse o projenin id numarası; genel ofis geliriyse boş bırak' },
+      not_metni: { type: 'string', description: 'Ek not (opsiyonel)' },
+    },
+    required: ['tutar'],
+  },
+};
+
+async function runChatTool(name, input, isletme_id) {
+  const todayISO = new Date().toISOString().slice(0, 10);
+  if (name === 'gider_ekle') {
+    const { gider_turu, firma, tutar, tarih, ay, durum, proje_id, not_metni } = input || {};
+    const { rows } = await q(
+      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, proje_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
+      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih || todayISO, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null]
+    );
+    return { ok: true, summary: `Gider eklendi: ${gider_turu || firma || 'gider'} — ${Number(tutar || 0).toLocaleString('tr-TR')} ₺ (kayıt no ${rows[0].id})` };
+  }
+  if (name === 'gelir_ekle') {
+    const { aciklama, tutar, tarih, durum, proje_id, not_metni } = input || {};
+    const { rows } = await q(
+      `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, not_metni, proje_id)
+       values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+      [isletme_id, aciklama ?? null, tutar ?? null, tarih || todayISO, durum || 'ÖDENDİ', not_metni ?? null, proje_id ?? null]
+    );
+    return { ok: true, summary: `Gelir eklendi: ${aciklama || 'gelir'} — ${Number(tutar || 0).toLocaleString('tr-TR')} ₺ (kayıt no ${rows[0].id})` };
+  }
+  return { ok: false, summary: 'Bilinmeyen işlem: ' + name };
+}
+
+// ------------------------------------------------------------------
 // Sohbet asistanı (Claude)
 // ------------------------------------------------------------------
 app.post('/api/chat', requireAuth, async (req, res) => {
@@ -630,8 +694,10 @@ app.post('/api/chat', requireAuth, async (req, res) => {
 
     let context = '';
     let system = '';
+    let tools = [];
 
     if (isSite) {
+      tools = [CHAT_TOOL_ADD_EXPENSE];
       // Güncel duruma dair kısa bir özet çıkar, asistanın gerçek verilerden haberi olsun
       const [{ rows: apartments }, { rows: payments }, { rows: expenses }] = await Promise.all([
         q('select no from apartments where isletme_id = $1', [isletme_id]),
@@ -666,8 +732,9 @@ Bilmen gereken temel mevzuat noktaları (genel bilgi olarak kullan):
 
 Yöneticiye aidat, demirbaş, fatura/gider, personel takibi ve site muhasebesiyle ilgili sorularda yardımcı ol. Uygulamanın Özet sekmesindeki "Raporlar ve Belgeler" bölümünde Gelir-Gider Tablosu, İşletme Projesi Hesaplayıcı, Genel Kurul Özet Raporu ve Yasal Belgeler takip listesi olduğunu biliyorsun; ilgili sorularda oraya yönlendirebilirsin.
 
-Her zaman Türkçe, kısa ve net cevaplar ver. Kesin hukuki veya vergisel sonucu olan konularda (ceza, dava süreci, vergi mükellefiyeti gibi) genel bilgi verebilirsin ama bunun bağlayıcı hukuki/mali tavsiye olmadığını, kesinleşmesi gereken konularda bir mali müşavir veya avukata danışılmasını belirt. Aşağıda uygulamanın güncel veri özeti var, sorular buna göre yanıtlanabilir; ama tam liste/detay gerekiyorsa yöneticiye uygulama içindeki ilgili sekmeye bakmasını söyle (elinde satır satır veri yok, sadece bu özet var).\n\nGÜNCEL DURUM:\n${context}`;
+Her zaman Türkçe, kısa ve net cevaplar ver. Kesin hukuki veya vergisel sonucu olan konularda (ceza, dava süreci, vergi mükellefiyeti gibi) genel bilgi verebilirsin ama bunun bağlayıcı hukuki/mali tavsiye olmadığını, kesinleşmesi gereken konularda bir mali müşavir veya avukata danışılmasını belirt. Aşağıda uygulamanın güncel veri özeti var, sorular buna göre yanıtlanabilir; ama tam liste/detay gerekiyorsa yöneticiye uygulama içindeki ilgili sekmeye bakmasını söyle (elinde satır satır veri yok, sadece bu özet var).\n\nÖNEMLİ: Yönetici sana "şu kadar TL elektrik gideri ekle", "500 TL fatura ödedim, kaydet" gibi bir gider/fatura eklemeni söylerse, ona nasıl ekleyeceğini anlatmak yerine "gider_ekle" aracını kullanarak kaydı SEN DOĞRUDAN EKLE. Tutar ve tür gibi temel bilgiler yeterli, eksik detay (firma, tarih vb.) için illa soru sorman gerekmez, makul varsayımlarla ekleyip sonucu özetle.\n\nGÜNCEL DURUM:\n${context}`;
     } else {
+      tools = [CHAT_TOOL_ADD_EXPENSE, CHAT_TOOL_ADD_INCOME];
       const [{ rows: gelirler }, { rows: expenses }, { rows: contracts }, { rows: projeler }] = await Promise.all([
         q('select * from gelirler where isletme_id = $1', [isletme_id]),
         q('select * from expenses where isletme_id = $1', [isletme_id]),
@@ -683,7 +750,7 @@ Her zaman Türkçe, kısa ve net cevaplar ver. Kesin hukuki veya vergisel sonucu
       const projeSatirlari = (projeler || []).map((proje) => {
         const pg = (gelirler || []).filter((g) => g.proje_id === proje.id && g.durum === 'ÖDENDİ').reduce((s, g) => s + (Number(g.tutar) || 0), 0);
         const pe = (expenses || []).filter((e) => e.proje_id === proje.id && e.durum === 'ÖDENDİ').reduce((s, e) => s + (Number(e.tutar) || 0), 0);
-        return `- ${proje.ad} (${proje.durum}): gelir ${pg.toLocaleString('tr-TR')} ₺, gider ${pe.toLocaleString('tr-TR')} ₺, net ${(pg - pe).toLocaleString('tr-TR')} ₺`;
+        return `- ${proje.ad} (id: ${proje.id}, durum: ${proje.durum}): gelir ${pg.toLocaleString('tr-TR')} ₺, gider ${pe.toLocaleString('tr-TR')} ₺, net ${(pg - pe).toLocaleString('tr-TR')} ₺`;
       }).join('\n');
 
       context = `
@@ -691,20 +758,48 @@ Toplam gelen para (ödendi işaretli): ${gelirToplam.toLocaleString('tr-TR')} �
 Toplam ödenen gider: ${giderToplam.toLocaleString('tr-TR')} ₺
 Net durum: ${(gelirToplam - giderToplam).toLocaleString('tr-TR')} ₺
 Toplam kontrat sayısı: ${(contracts || []).length} (Satılık: ${satilikSayisi}, Kiralık: ${kiralikSayisi}, Aktif: ${aktifKontrat.length})
-${projeler && projeler.length ? `\nProjeler (${projeler.length} adet):\n${projeSatirlari}` : ''}
+${projeler && projeler.length ? `\nProjeler (id numaralarıyla birlikte):\n${projeSatirlari}` : ''}
 `.trim();
 
-      system = `Sen "${isletmeAdi}" işletmesinin (ofis, inşaat veya gayrimenkul projesi olabilir) muhasebe ve iş takibi asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi, satılık/kiralık kontrat durumu hakkında sorulara yardımcı ol. Uygulamada "Kontratlar" sekmesinde satılık/kiralık mülk kontratlarının (karşı taraf, tutar, tarih, durum, belge) tutulduğunu, "Projeler" sekmesinde ise şirketin birden fazla inşaat/mimarlık projesinin her birinin kendi gelir-gider-kontrat kayıtlarıyla ayrı takip edildiğini, projeye bağlanmayan kayıtların "Ofis Geneli" sayıldığını biliyorsun; ilgili sorularda oraya yönlendirebilirsin. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nGÜNCEL DURUM:\n${context}`;
+      system = `Sen "${isletmeAdi}" işletmesinin (ofis, inşaat veya gayrimenkul projesi olabilir) muhasebe ve iş takibi asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi, satılık/kiralık kontrat durumu hakkında sorulara yardımcı ol. Uygulamada "Kontratlar" sekmesinde satılık/kiralık mülk kontratlarının (karşı taraf, tutar, tarih, durum, belge) tutulduğunu, "Projeler" sekmesinde ise şirketin birden fazla inşaat/mimarlık projesinin her birinin kendi gelir-gider-kontrat kayıtlarıyla ayrı takip edildiğini, projeye bağlanmayan kayıtların "Ofis Geneli" sayıldığını biliyorsun; ilgili sorularda oraya yönlendirebilirsin. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nÖNEMLİ: Yönetici sana bir gider/fatura ("500 TL elektrik gideri ekle") veya bir gelir/tahsilat ("10.000 TL kira geliri geldi, kaydet") eklemeni söylerse, nasıl ekleyeceğini anlatmak yerine ilgili aracı ("gider_ekle" veya "gelir_ekle") kullanarak kaydı SEN DOĞRUDAN EKLE. Kullanıcı bir proje/inşaat adı söylerse (örn. "Bahçelievler projesine ekle"), yukarıdaki proje listesinden doğru proje id'sini bul ve kullan; proje belirtmezse proje_id'yi boş bırak (Ofis Geneli sayılır). Eksik detaylar için illa soru sormana gerek yok, makul varsayımlarla (tarih belirtilmemişse bugün, durum belirtilmemişse gidercte ÖDENMEDİ / gelirde ÖDENDİ) ekleyip sonucu kısaca özetle.\n\nGÜNCEL DURUM:\n${context}`;
     }
 
-    const msg = await anthropic.messages.create({
-      model: CHAT_MODEL,
-      max_tokens: 1024,
-      system,
-      messages: [...(Array.isArray(history) ? history : []), { role: 'user', content: message }],
-    });
-    const text = msg.content.find((b) => b.type === 'text')?.text || '';
-    res.json({ response: text });
+    let messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: message }];
+    let finalText = '';
+    let changed = false;
+
+    for (let round = 0; round < 5; round++) {
+      const msg = await anthropic.messages.create({
+        model: CHAT_MODEL,
+        max_tokens: 1024,
+        system,
+        tools: tools.length ? tools : undefined,
+        messages,
+      });
+
+      const textBlock = msg.content.find((b) => b.type === 'text');
+      if (textBlock) finalText = textBlock.text;
+
+      const toolUses = msg.content.filter((b) => b.type === 'tool_use');
+      if (!toolUses.length) break;
+
+      messages.push({ role: 'assistant', content: msg.content });
+      const toolResults = [];
+      for (const tu of toolUses) {
+        let resultText;
+        try {
+          const result = await runChatTool(tu.name, tu.input, isletme_id);
+          if (result.ok) changed = true;
+          resultText = result.summary;
+        } catch (err) {
+          resultText = 'Hata: ' + err.message;
+        }
+        toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: resultText });
+      }
+      messages.push({ role: 'user', content: toolResults });
+    }
+
+    res.json({ response: finalText, changed });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
