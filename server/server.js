@@ -17,6 +17,11 @@ dotenv.config();
 // bozulmasın diye burada sayıya çeviriyoruz.
 pg.types.setTypeParser(20, (val) => (val === null ? null : parseInt(val, 10))); // int8 / bigint
 pg.types.setTypeParser(1700, (val) => (val === null ? null : parseFloat(val))); // numeric
+// 'date' sütunlarını (tarih, baslangic_tarihi, tarih vb.) node-postgres'in varsayılanı olan
+// JS Date nesnesine çevirmeden, Postgres'ten geldiği gibi 'YYYY-MM-DD' metni olarak bırak.
+// Aksi halde JSON'a çevrilirken saat eklenir (ör. "2026-08-20T00:00:00.000Z") ve arayüzdeki
+// <input type="date"> alanları bunu tanımadığı için kayıt düzenlemede tarih boş görünür.
+pg.types.setTypeParser(1082, (val) => val); // date
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -280,6 +285,40 @@ app.delete('/api/gelirler/:id', requireAuth, async (req, res) => {
 const CONTRACT_RETURNING = `id, isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni,
   belge_ad, belge_tip, (belge_data is not null) as has_belge, proje_id, created_at`;
 
+// Gayrimenkulde bir kontrat imzalandığı an gelir de sayılır: her kontrat için
+// otomatik, ona bağlı (kontrat_id ile) bir Gelir kaydı tutulur ve kontrat her
+// güncellendiğinde/silindiğinde bu gelir kaydı da senkron kalır.
+// "gelecek" (henüz kesinleşmemiş) kontratların geliri "ÖDENMEDİ" (beklemede) sayılır,
+// "aktif"/"tamamlandi" olanlarınki "ÖDENDİ" sayılır.
+function kontratGelirDurum(kontratDurum) {
+  return kontratDurum === 'gelecek' ? 'ÖDENMEDİ' : 'ÖDENDİ';
+}
+function kontratGelirAciklama(c) {
+  const tipLabel = c.tip === 'kiralik' ? 'Kiralık' : 'Satılık';
+  const parca = [c.mulk_adi, c.karsi_taraf].filter(Boolean).join(' - ');
+  return `Kontrat geliri: ${parca || 'Mülk'} (${tipLabel})`;
+}
+async function syncContractGelir(contract) {
+  if (!contract) return;
+  const durum = kontratGelirDurum(contract.durum);
+  const aciklama = kontratGelirAciklama(contract);
+  const tarih = contract.baslangic_tarihi || new Date().toISOString().slice(0, 10);
+  const notMetni = 'Bu gelir, ilgili kontrattan otomatik oluşturuldu/güncellendi. Değiştirmek için Kontratlar sekmesinden kontratı düzenleyin.';
+  const { rows } = await q('select id from gelirler where kontrat_id = $1', [contract.id]);
+  if (rows.length) {
+    await q(
+      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, proje_id = $6, not_metni = $7 where kontrat_id = $1`,
+      [contract.id, aciklama, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni]
+    );
+  } else {
+    await q(
+      `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, proje_id, not_metni, kontrat_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [contract.isletme_id, aciklama, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni, contract.id]
+    );
+  }
+}
+
 app.post('/api/contracts', requireAuth, async (req, res) => {
   try {
     const { isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, proje_id } = req.body || {};
@@ -304,6 +343,7 @@ app.post('/api/contracts', requireAuth, async (req, res) => {
         proje_id ?? null,
       ]
     );
+    await syncContractGelir(rows[0]);
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -347,6 +387,7 @@ app.put('/api/contracts/:id', requireAuth, async (req, res) => {
         proje_id ?? null,
       ]
     );
+    await syncContractGelir(rows[0]);
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -441,13 +482,22 @@ async function syncMaintenanceFromExpense(expense) {
   await q('update maintenance_items set son_yapilma_tarihi = $2 where id = $1', [expense.bakim_id, tarih]);
 }
 
+// Gider "Sabit Gider" mi yoksa "Extra Harcama" mı? Ön uçtan geldiyse onu kullan;
+// gelmediyse (ör. sohbet asistanından eklenirse) gider türü metnine bakarak tahmin et.
+function guessExpenseKategori(giderTuru, provided) {
+  if (provided === 'sabit' || provided === 'extra') return provided;
+  const t = (giderTuru || '').toLocaleLowerCase('tr-TR');
+  if (t.includes('kırtasiye') || t.includes('kirtasiye') || t.includes('mutfak') || t.includes('temizlik')) return 'extra';
+  return 'sabit';
+}
+
 app.post('/api/expenses', requireAuth, async (req, res) => {
   try {
-    const { isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id } = req.body || {};
+    const { isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori } = req.body || {};
     const { rows } = await q(
-      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning *`,
-      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null]
+      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
+      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null, guessExpenseKategori(gider_turu, kategori)]
     );
     await syncMaintenanceFromExpense(rows[0]);
     res.json(rows[0]);
@@ -459,11 +509,11 @@ app.post('/api/expenses', requireAuth, async (req, res) => {
 
 app.put('/api/expenses/:id', requireAuth, async (req, res) => {
   try {
-    const { ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id } = req.body || {};
+    const { ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori } = req.body || {};
     const { rows } = await q(
-      `update expenses set ay = $2, gider_turu = $3, firma = $4, tutar = $5, tarih = $6, durum = $7, not_metni = $8, bakim_id = $9, proje_id = $10
+      `update expenses set ay = $2, gider_turu = $3, firma = $4, tutar = $5, tarih = $6, durum = $7, not_metni = $8, bakim_id = $9, proje_id = $10, kategori = $11
        where id = $1 returning *`,
-      [req.params.id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null]
+      [req.params.id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null, guessExpenseKategori(gider_turu, kategori)]
     );
     await syncMaintenanceFromExpense(rows[0]);
     res.json(rows[0]);
@@ -659,9 +709,9 @@ async function runChatTool(name, input, isletme_id) {
   if (name === 'gider_ekle') {
     const { gider_turu, firma, tutar, tarih, ay, durum, proje_id, not_metni } = input || {};
     const { rows } = await q(
-      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, proje_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
-      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih || todayISO, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null]
+      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, proje_id, kategori)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih || todayISO, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null, guessExpenseKategori(gider_turu)]
     );
     return { ok: true, summary: `Gider eklendi: ${gider_turu || firma || 'gider'} — ${Number(tutar || 0).toLocaleString('tr-TR')} ₺ (kayıt no ${rows[0].id})` };
   }
