@@ -947,4 +947,1897 @@ function statusChip(durum){
   return `<span class="chip ${meta.chip}">${meta.label}</span>`;
 }
 
-/* ---------------------------- PROJE HELPERS (gelir/gider/kontrat'ı bir projeye etiketleme) ---------------------------- */
+/* ---------------------------- PROJE HELPERS (gelir/gider/kontrat'ı bir projeye etiketleme) ---------------------------- */// proje_id boş/null ise kayıt "Ofis Geneli" sayılır (belirli bir inşaat/mimarlık projesine ait değildir).
+function projeAdi(projeId){
+  if(!projeId) return 'Ofis Geneli';
+  const p = STATE.projeler.find(x=>x.id===projeId);
+  return p ? p.ad : 'Ofis Geneli';
+}
+function projeChip(projeId){
+  const isGenel = !projeId;
+  return `<span class="chip" style="background:${isGenel?'var(--neutral-chip)':'var(--brand-soft)'};color:${isGenel?'var(--ink-dim)':'var(--brand)'};">${esc(projeAdi(projeId))}</span>`;
+}
+// Kayıt ekleme/düzenleme formlarında ortak "Hangi projeye ait?" seçim kutusu.
+function projeSelectHtml(selectedId){
+  const opts = STATE.projeler.map(p=>`<option value="${p.id}" ${selectedId===p.id?'selected':''}>${esc(p.ad)}</option>`).join('');
+  return `<option value="" ${!selectedId?'selected':''}>— Ofis Geneli (projeye özel değil) —</option>${opts}`;
+}
+
+/* ---------------------------- ÖZET TAB ---------------------------- */
+function dueMaintenanceItems(){
+  const today = new Date();
+  const limitDays = {aylik:31, '3ayda_bir':92, yillik:366};
+  return STATE.maintenanceItems.filter(mi=>{
+    if(!mi.son_yapilma_tarihi) return true;
+    const gecen = (today - new Date(mi.son_yapilma_tarihi)) / (1000*60*60*24);
+    return gecen >= (limitDays[mi.siklik] || 31);
+  });
+}
+
+function renderOzet(){
+  if(!isSiteTipi()) return renderOzetGenel();
+  const m = STATE.currentMonth;
+  const mp = m ? monthPayments(m).filter(p=>{ const apt=STATE.apartments.find(a=>a.no===p.apartment_no); return !isMuaf(apt); }) : [];
+  const tahsil = mp.reduce((s,p)=>s+(Number(p.tutar_odenen)||0),0);
+  const odenmemis = mp.filter(p=>p.durum==='ÖDENMEDİ').length;
+  const odenen = mp.filter(p=>p.durum==='ÖDENDİ').length;
+  const demirbasRows = STATE.payments.filter(p=>p.tur==='demirbas');
+  const demirbasTahsil = demirbasRows.reduce((s,p)=>s+(Number(p.tutar_odenen)||0),0);
+  const demirbasKalan = demirbasRows.filter(p=>p.durum!=='ÖDENDİ').length;
+  const giderToplam = STATE.expenses.filter(e=> m ? (e.ay||'').toUpperCase().includes(monthLabel(m).split(' ')[0].toUpperCase()) : false)
+                                     .filter(e=>e.durum==='ÖDENDİ')
+                                     .reduce((s,e)=>s+(Number(e.tutar)||0),0);
+  const flagged = STATE.payments.filter(p=>{
+    if(!['KONTROL EDİLSİN','VERMİYOR'].includes(p.durum)) return false;
+    if(p.tur==='aidat'){ const apt=STATE.apartments.find(a=>a.no===p.apartment_no); if(isMuaf(apt)) return false; }
+    return true;
+  });
+  const dueBakim = dueMaintenanceItems();
+
+  return `
+    ${!m ? `<div class="empty">${ICON.box}<div><b>Henüz bir ay eklenmedi.</b><br>Daireler sekmesinden ilk ayı ekleyerek başlayın.</div></div>` : `
+    <div class="section-title">${monthLabel(m)} Özeti</div>
+    <div class="kpis">
+      <div class="kpi good">
+        <div class="lbl">Aidat Tahsilatı</div>
+        <div class="val">${tl(tahsil)}</div>
+        <div class="delta">${odenen}/${STATE.apartments.length} daire ödedi</div>
+      </div>
+      <div class="kpi ${odenmemis?'bad':'good'}">
+        <div class="lbl">Ödenmeyen Daire</div>
+        <div class="val">${odenmemis}</div>
+        <div class="delta">bu ay için</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Demirbaş Tahsilatı</div>
+        <div class="val" style="font-size:16px;">${tl(demirbasTahsil)}</div>
+        <div class="delta">${demirbasKalan} daire kaldı</div>
+      </div>
+      <div class="kpi">
+        <div class="lbl">Bu Ay Ödenen Gider</div>
+        <div class="val" style="font-size:16px;">${tl(giderToplam)}</div>
+        <div class="delta">faturalar</div>
+      </div>
+    </div>`}
+
+    ${flagged.length ? `
+    <div class="section-title">Dikkat Gerekenler</div>
+    ${flagged.map(f=>{
+      const apt = STATE.apartments.find(a=>a.no===f.apartment_no);
+      const per = f.tur==='demirbas' ? 'Demirbaş' : monthLabel(f.donem);
+      return `<div class="alert-card" data-open-apt="${f.apartment_no}">
+        ${ICON.alert}
+        <div><b>Daire ${f.apartment_no} — ${esc(apt?.malik||'')}</b>
+        <p>${per}: ${f.not_metni || STATUS_META[f.durum]?.label || f.durum}</p></div>
+      </div>`;
+    }).join('')}
+    ` : ''}
+
+    ${dueBakim.length ? `
+    <div class="section-title">Bakım Zamanı Geldi</div>
+    ${dueBakim.map(mi=>`<div class="alert-card">
+      ${ICON.alert}
+      <div><b>${esc(mi.ad)}</b>
+      <p>${mi.son_yapilma_tarihi ? 'Son yapılma: '+new Date(mi.son_yapilma_tarihi).toLocaleDateString('tr-TR') : 'Hiç kaydedilmemiş'} — zamanı geldi</p></div>
+    </div>`).join('')}
+    ` : ''}
+
+    <div class="section-title">Raporlar</div>
+    <div class="apt-row" id="openReportsBtn">
+      <div class="report-icon">${ICON.reportIcon}</div>
+      <div class="apt-info">
+        <div class="name">Raporlar ve Belgeler</div>
+        <div class="kat">Gelir-gider, işletme projesi, genel kurul, yasal belgeler</div>
+      </div>
+      ${ICON.chevron}
+    </div>
+  `;
+}
+
+function renderOzetGenel(){
+  const gelirToplam = STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+  const giderToplam = STATE.expenses.filter(e=>e.durum==='ÖDENDİ').reduce((s,e)=>s+(Number(e.tutar)||0),0);
+  const personelToplam = STATE.staff.reduce((s,p)=>s+(Number(p.aylik_ucret)||0),0);
+  const net = gelirToplam - giderToplam;
+  const bekleyenGelir = STATE.gelirler.filter(g=>g.durum!=='ÖDENDİ');
+  const bekleyenGider = STATE.expenses.filter(e=>e.durum!=='ÖDENDİ');
+
+  return `
+    <div class="section-title">${esc(currentIsletme()?.ad||'')} Özeti</div>
+    <div class="kpis">
+      <div class="kpi good">
+        <div class="lbl">Toplam Gelen</div>
+        <div class="val">${tl(gelirToplam)}</div>
+        <div class="delta">ödendi işaretli</div>
+      </div>
+      <div class="kpi bad">
+        <div class="lbl">Toplam Giden</div>
+        <div class="val">${tl(giderToplam)}</div>
+        <div class="delta">ödendi işaretli</div>
+      </div>
+      <div class="kpi ${net>=0?'good':'bad'}">
+        <div class="lbl">Net Durum</div>
+        <div class="val">${tl(net)}</div>
+        <div class="delta">Aylık personel yükü: ${tl(personelToplam)}</div>
+      </div>
+    </div>
+
+    ${STATE.projeler.length ? `
+    <div class="section-title">Projeler</div>
+    <div class="row-list">
+      ${STATE.projeler.slice(0,5).map(p=>{
+        const oz = projeOzetSayilari(p.id);
+        return `<div class="apt-row" data-goto-proje="${p.id}">
+          <div class="apt-no" style="border-radius:11px;">${ICON.proje}</div>
+          <div class="apt-info">
+            <div class="name">${esc(p.ad)}</div>
+            <div class="kat">${PROJE_DURUM_META[p.durum]?.label||'Aktif'}</div>
+          </div>
+          <div class="apt-amount" style="font-weight:700;color:${oz.net>=0?'var(--success)':'var(--danger)'};">${tl(oz.net)}</div>
+          ${ICON.chevron}
+        </div>`;
+      }).join('')}
+    </div>
+    ` : ''}
+
+    ${(bekleyenGelir.length || bekleyenGider.length) ? `
+    <div class="section-title">Dikkat Gerekenler</div>
+    ${bekleyenGelir.map(g=>`<div class="alert-card" data-open-gelir="${g.id}">
+      ${ICON.alert}
+      <div><b>Bekleyen gelir — ${esc(g.aciklama||'')}</b><p>${tl(g.tutar)} — henüz ödenmedi</p></div>
+    </div>`).join('')}
+    ${bekleyenGider.map(e=>`<div class="alert-card" data-open-exp="${e.id}">
+      ${ICON.alert}
+      <div><b>Bekleyen gider — ${esc(e.gider_turu||e.firma||'')}</b><p>${tl(e.tutar)} — henüz ödenmedi</p></div>
+    </div>`).join('')}
+    ` : ''}
+
+    <div class="section-title">Raporlar</div>
+    <div class="apt-row" id="openReportsBtn">
+      <div class="report-icon">${ICON.reportIcon}</div>
+      <div class="apt-info">
+        <div class="name">Gelir-Gider Raporu</div>
+        <div class="kat">Toplam tahsilat ve gider özeti</div>
+      </div>
+      ${ICON.chevron}
+    </div>
+  `;
+}
+
+/* ---------------------------- DAİRELER TAB ---------------------------- */
+function renderDaireler(){
+  if(!STATE.months.length){
+    return `<div class="empty">${ICON.calendar}<div><b>Önce bir ay ekleyin</b><br>Üstteki "Yeni Ay Ekle" ile ilk aidat ayını (örn. Eylül) oluşturun.</div></div>`;
+  }
+  const q = STATE.search.trim().toLocaleLowerCase('tr-TR');
+  const list = STATE.apartments.filter(a=>{
+    if(!q) return true;
+    return String(a.no).includes(q) || (a.malik||'').toLocaleLowerCase('tr-TR').includes(q);
+  });
+  const recentMonths = STATE.months.slice(-3);
+  const odenmeyen = STATE.apartments.filter(a=>{
+    if(isMuaf(a)) return false;
+    const p = paymentFor(a.no,'aidat',STATE.currentMonth);
+    return !p || p.durum==='ÖDENMEDİ';
+  }).length;
+  let toplamKalan = 0;
+  STATE.apartments.forEach(a=>{ toplamKalan += computeAptBalance(a.no).kalan; });
+
+  return `
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Daire</div><div class="val">${STATE.apartments.length}</div></div>
+      <div class="kpi ${odenmeyen?'bad':'good'}"><div class="lbl">${monthLabel(STATE.currentMonth)} Ödemeyen</div><div class="val">${odenmeyen}</div></div>
+      <div class="kpi"><div class="lbl">Standart Aidat</div><div class="val" style="font-size:16px;">${STATE.settings.standart_aidat_tutari ? tl(STATE.settings.standart_aidat_tutari) : '—'}</div></div>
+      <div class="kpi ${toplamKalan>0?'bad':'good'}"><div class="lbl">Toplam Kalan Borç</div><div class="val">${tl(toplamKalan)}</div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-card-head">
+        <h2>Aidat Takip Tablosu</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="searchInput" placeholder="Daire no veya malik ara..." value="${esc(STATE.search)}" style="border:1px solid var(--line);border-radius:7px;padding:7px 11px;font:inherit;font-size:12px;width:190px;background:var(--surface);color:var(--ink);" />
+          <button class="btn-toolbar" id="openAidatTutariBtn" type="button">${ICON.calculator} Aidat Tutarı</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr>
+            <th>Daire</th><th>Kat</th><th>Malik / Kiracı</th>
+            ${recentMonths.map(m=>`<th class="num">${monthShort(m)}</th>`).join('')}
+            <th class="num">Kalan Borç</th><th>Durum</th>
+          </tr></thead>
+          <tbody>
+            ${list.map(a=>{
+              const p = paymentFor(a.no,'aidat',STATE.currentMonth);
+              const durum = p ? p.durum : 'ÖDENMEDİ';
+              const bal = computeAptBalance(a.no);
+              return `<tr data-open-apt="${a.no}">
+                <td class="mono">${a.no}</td>
+                <td>${esc((a.kat||'').replace('.NORMAL KAT','.Kat'))}</td>
+                <td class="name-cell">${esc(a.malik||'—')}${a.durum==='kiraci'?' <span style="color:var(--ink-dim);font-weight:400;">(kiracı)</span>':''}</td>
+                ${recentMonths.map(m=>{
+                  const mp = paymentFor(a.no,'aidat',m);
+                  const ok = mp && mp.durum==='ÖDENDİ';
+                  return `<td class="num" style="${ok?'':'color:var(--ink-dim);'}">${ok?tl(mp.tutar_odenen):'—'}</td>`;
+                }).join('')}
+                <td class="num" style="color:${bal.muaf?'var(--ink-dim)':(bal.kalan>0?'var(--danger)':'var(--success)')};">${bal.muaf?'Muaf':tl(bal.kalan)}</td>
+                <td>${statusChip(durum)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${list.length} / ${STATE.apartments.length} daire gösteriliyor</span><span>Toplam kalan borç: ${tl(toplamKalan)}</span></div>
+    </div>
+  `;
+}
+
+function openAidatTutariSheet(){
+  const html = `
+    <div class="sheet-head">
+      <h2>Standart Aidat Tutarı</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">Her daireden her ay istenen standart aidat tutarını girin. Daire bakiyeleri (kalan borç) buna göre hesaplanır. Aidattan muaf daireler bu hesaba hiç dahil edilmez.</p>
+    <div class="field"><label>Aylık Aidat Tutarı (₺)</label><input type="number" inputmode="decimal" id="aidatTutariInput" value="${STATE.settings.standart_aidat_tutari||''}" /></div>
+    <button class="btn btn-primary btn-block" id="aidatTutariSave">Kaydet</button>
+  `;
+  openSheet(html);
+  document.getElementById('aidatTutariSave').onclick = async ()=>{
+    const v = document.getElementById('aidatTutariInput').value;
+    await saveSetting('standart_aidat_tutari', v===''?null:Number(v));
+    closeSheet(); showToast('Kaydedildi'); renderMain();
+  };
+}
+
+/* ---------------------------- GİDERLER TAB ---------------------------- */
+function renderGiderler(){
+  if(!STATE.expenses.length){
+    return `<div class="empty">${ICON.receipt}<div><b>Henüz gider kaydı yok</b><br>Üstteki "Yeni Gider" ile ilk faturayı ekleyin.</div></div>`;
+  }
+  const toplam = STATE.expenses.filter(e=>e.durum==='ÖDENDİ').reduce((s,e)=>s+(Number(e.tutar)||0),0);
+  const bekleyen = STATE.expenses.filter(e=>e.durum!=='ÖDENDİ').length;
+  return `
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Kayıt</div><div class="val">${STATE.expenses.length}</div></div>
+      <div class="kpi ${bekleyen?'warn':'good'}"><div class="lbl">Ödenmeyi Bekleyen</div><div class="val">${bekleyen}</div></div>
+      <div class="kpi good"><div class="lbl">Toplam Ödenen Gider</div><div class="val">${tl(toplam)}</div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-card-head"><h2>Gider Kayıtları</h2></div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr>
+            <th>Ay</th><th>Gider Türü</th><th>Firma</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th>
+          </tr></thead>
+          <tbody>
+            ${STATE.expenses.map(e=>`
+              <tr data-open-exp="${e.id}">
+                <td class="mono">${esc(e.ay||'—')}</td>
+                <td class="name-cell">${esc(e.gider_turu||'—')}</td>
+                <td>${esc(e.firma||'—')}</td>
+                ${STATE.projeler.length?`<td>${projeChip(e.proje_id)}</td>`:''}
+                <td>${e.tarih? new Date(e.tarih).toLocaleDateString('tr-TR'):'—'}</td>
+                <td class="num">${tl(e.tutar)}</td>
+                <td>${statusChip(e.durum)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${STATE.expenses.length} kayıt</span><span>Toplam ödenen: ${tl(toplam)}</span></div>
+    </div>
+  `;
+}
+
+// Personel maaş takibi hangi aylar için gösterilsin: site tipinde aidat ayları,
+// genel tipte (ofis/inşaat) aidat kavramı olmadığı için son 6 ay otomatik üretilir.
+function staffMonthsFor(){
+  if(isSiteTipi()) return STATE.months;
+  const out = [];
+  const d = new Date();
+  for(let i=5;i>=0;i--){
+    const dt = new Date(d.getFullYear(), d.getMonth()-i, 1);
+    out.push(dt.toISOString().slice(0,7));
+  }
+  return out;
+}
+
+/* ---------------------------- GELİR TAB (ofis/inşaat) ---------------------------- */
+function renderGelir(){
+  if(!STATE.gelirler.length){
+    return `<div class="empty">${ICON.box}<div><b>Henüz gelir kaydı yok</b><br>Üstteki "Yeni Gelir" ile ilk geliri ekleyin.</div></div>`;
+  }
+  const toplam = STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+  const bekleyen = STATE.gelirler.filter(g=>g.durum!=='ÖDENDİ').length;
+  return `
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Kayıt</div><div class="val">${STATE.gelirler.length}</div></div>
+      <div class="kpi ${bekleyen?'warn':'good'}"><div class="lbl">Beklemede</div><div class="val">${bekleyen}</div></div>
+      <div class="kpi good"><div class="lbl">Toplam Alınan Gelir</div><div class="val">${tl(toplam)}</div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-card-head"><h2>Gelir Kayıtları</h2></div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr><th>Açıklama</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+          <tbody>
+            ${STATE.gelirler.map(g=>`
+              <tr data-open-gelir="${g.id}">
+                <td class="name-cell">${esc(g.aciklama||'—')}</td>
+                ${STATE.projeler.length?`<td>${projeChip(g.proje_id)}</td>`:''}
+                <td>${g.tarih? new Date(g.tarih).toLocaleDateString('tr-TR'):'—'}</td>
+                <td class="num">${tl(g.tutar)}</td>
+                <td>${statusChip(g.durum)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${STATE.gelirler.length} kayıt</span><span>Toplam alınan: ${tl(toplam)}</span></div>
+    </div>
+  `;
+}
+
+function openGelirSheet(id, presetProjeId){
+  const g = id ? STATE.gelirler.find(x=>x.id===id) : null;
+  const html = `
+    <div class="sheet-head">
+      <h2>${g?'Geliri Düzenle':'Yeni Gelir'}</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <div class="field"><label>Açıklama</label><input id="g_aciklama" value="${esc(g?.aciklama||'')}" placeholder="örn. Ortak ödemesi, 3 nolu daire satışı, ofis kirası..." /></div>
+    ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="g_proje">${projeSelectHtml(g?g.proje_id:presetProjeId)}</select></div>` : ''}
+    <div class="field"><label>Tutar (₺)</label><input id="g_tutar" type="number" inputmode="decimal" value="${g?.tutar??''}" /></div>
+    <div class="field"><label>Tarih</label><input id="g_tarih" type="date" value="${g?.tarih||''}" /></div>
+    <div class="field"><label>Durum</label>
+      <div class="seg">
+        <button type="button" data-d="ÖDENDİ" class="${g?.durum==='ÖDENDİ'?'on odendi':''}">Alındı</button>
+        <button type="button" data-d="ÖDENMEDİ" class="${(!g||g?.durum==='ÖDENMEDİ')?'on odenmedi':''}">Beklemede</button>
+      </div>
+    </div>
+    <div class="field"><label>Not</label><textarea id="g_not">${esc(g?.not_metni||'')}</textarea></div>
+    <div style="display:flex;gap:9px;">
+      ${g?`<button class="btn btn-danger" id="delGelirBtn">${ICON.trash}</button>`:''}
+      <button class="btn btn-primary btn-block" id="saveGelirBtn">Kaydet</button>
+    </div>
+  `;
+  openSheet(html);
+  let durum = g?.durum || 'ÖDENMEDİ';
+  document.querySelectorAll('[data-d]').forEach(b=>{
+    b.onclick = ()=>{
+      document.querySelectorAll('[data-d]').forEach(x=>x.className='');
+      durum = b.dataset.d;
+      b.className = 'on ' + (durum==='ÖDENDİ'?'odendi':'odenmedi');
+    };
+  });
+  document.getElementById('saveGelirBtn').onclick = async ()=>{
+    const projeSel = document.getElementById('g_proje');
+    const payload = {
+      isletme_id: STATE.currentIsletmeId,
+      aciklama: document.getElementById('g_aciklama').value || null,
+      tutar: document.getElementById('g_tutar').value===''?null:Number(document.getElementById('g_tutar').value),
+      tarih: document.getElementById('g_tarih').value || null,
+      durum,
+      not_metni: document.getElementById('g_not').value || null,
+      proje_id: projeSel && projeSel.value ? Number(projeSel.value) : null,
+    };
+    try{
+      const data = g
+        ? await api('/api/gelirler/'+g.id, {method:'PUT', body:payload})
+        : await api('/api/gelirler', {method:'POST', body:payload});
+      if(g){ const idx = STATE.gelirler.findIndex(x=>x.id===g.id); STATE.gelirler[idx]=data; }
+      else STATE.gelirler.unshift(data);
+      closeSheet(); showToast('Kaydedildi'); renderMain();
+    }catch(err){ showToast('Kaydedilemedi: '+err.message); }
+  };
+  const del = document.getElementById('delGelirBtn');
+  if(del) del.onclick = async ()=>{
+    try{
+      await api('/api/gelirler/'+g.id, {method:'DELETE'});
+      STATE.gelirler = STATE.gelirler.filter(x=>x.id!==g.id);
+      closeSheet(); showToast('Silindi'); renderMain();
+    }catch(err){ showToast('Silinemedi: '+err.message); }
+  };
+}
+
+/* ---------------------------- KONTRATLAR TAB (ofis/inşaat — satılık/kiralık takibi) ---------------------------- */
+const KONTRAT_DURUM_META = {
+  aktif:       {chip:'odendi',   label:'Aktif'},
+  tamamlandi:  {chip:'odenmedi', label:'Tamamlandı'},
+  gelecek:     {chip:'kismi',    label:'Gelecek'},
+};
+function kontratDurumChip(durum){
+  const meta = KONTRAT_DURUM_META[durum] || KONTRAT_DURUM_META.aktif;
+  return `<span class="chip ${meta.chip}">${meta.label}</span>`;
+}
+function kontratTipLabel(tip){ return tip==='kiralik' ? 'Kiralık' : 'Satılık'; }
+
+function renderKontratlar(){
+  if(!STATE.contracts.length){
+    return `<div class="empty">${ICON.contract}<div><b>Henüz kontrat kaydı yok</b><br>Üstteki "Yeni Kontrat" ile ilk satılık/kiralık kaydını ekleyin.</div></div>`;
+  }
+  const aktifSayisi = STATE.contracts.filter(k=>k.durum==='aktif').length;
+  const satilikSayisi = STATE.contracts.filter(k=>k.tip==='satilik').length;
+  const kiralikSayisi = STATE.contracts.filter(k=>k.tip==='kiralik').length;
+  const toplamTutar = STATE.contracts.reduce((s,k)=>s+(Number(k.tutar)||0),0);
+  return `
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Kontrat</div><div class="val">${STATE.contracts.length}</div></div>
+      <div class="kpi good"><div class="lbl">Aktif</div><div class="val">${aktifSayisi}</div></div>
+      <div class="kpi"><div class="lbl">Satılık / Kiralık</div><div class="val" style="font-size:16px;">${satilikSayisi} / ${kiralikSayisi}</div></div>
+      <div class="kpi good"><div class="lbl">Toplam Tutar</div><div class="val">${tl(toplamTutar)}</div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-card-head"><h2>Kontrat Kayıtları</h2></div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr>
+            <th>Mülk</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tip</th><th>Karşı Taraf</th><th>Başlangıç</th><th>Bitiş</th><th class="num">Tutar</th><th>Durum</th><th>Belge</th>
+          </tr></thead>
+          <tbody>
+            ${STATE.contracts.map(k=>`
+              <tr data-open-kontrat="${k.id}">
+                <td class="name-cell">${esc(k.mulk_adi||'—')}</td>
+                ${STATE.projeler.length?`<td>${projeChip(k.proje_id)}</td>`:''}
+                <td>${kontratTipLabel(k.tip)}</td>
+                <td>${esc(k.karsi_taraf||'—')}</td>
+                <td>${k.baslangic_tarihi? new Date(k.baslangic_tarihi).toLocaleDateString('tr-TR'):'—'}</td>
+                <td>${k.bitis_tarihi? new Date(k.bitis_tarihi).toLocaleDateString('tr-TR'):'—'}</td>
+                <td class="num">${tl(k.tutar)}</td>
+                <td>${kontratDurumChip(k.durum)}</td>
+                <td>${k.has_belge? ICON.paperclip : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${STATE.contracts.length} kayıt</span><span>Toplam tutar: ${tl(toplamTutar)}</span></div>
+    </div>
+  `;
+}
+
+async function openContractBelge(id){
+  try{
+    const res = await fetch('/api/contracts/'+id+'/belge', {headers: authToken() ? {'Authorization':'Bearer '+authToken()} : {}});
+    if(!res.ok) throw new Error('Belge alınamadı');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  }catch(err){ showToast('Belge açılamadı: '+err.message); }
+}
+
+function openContractSheet(id, presetProjeId){
+  const k = id ? STATE.contracts.find(x=>x.id===id) : null;
+  const html = `
+    <div class="sheet-head">
+      <h2>${k?'Kontratı Düzenle':'Yeni Kontrat'}</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <div class="field"><label>Mülk Adı / Adresi</label><input id="k_mulk" value="${esc(k?.mulk_adi||'')}" placeholder="örn. Bahçelievler 3. Cadde No:12 Daire 4" /></div>
+    ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="k_proje">${projeSelectHtml(k?k.proje_id:presetProjeId)}</select></div>` : ''}
+    <div class="field"><label>Tip</label>
+      <div class="seg">
+        <button type="button" data-tip="satilik" class="${(!k||k?.tip==='satilik')?'on odendi':''}">Satılık</button>
+        <button type="button" data-tip="kiralik" class="${k?.tip==='kiralik'?'on odendi':''}">Kiralık</button>
+      </div>
+    </div>
+    <div class="field"><label>Karşı Taraf (Alıcı / Kiracı)</label><input id="k_karsi" value="${esc(k?.karsi_taraf||'')}" placeholder="örn. Ahmet Yılmaz" /></div>
+    <div class="field"><label>Tutar (₺)</label><input id="k_tutar" type="number" inputmode="decimal" value="${k?.tutar??''}" /></div>
+    <div class="field"><label>Başlangıç Tarihi</label><input id="k_baslangic" type="date" value="${k?.baslangic_tarihi||''}" /></div>
+    <div class="field"><label>Bitiş Tarihi (varsa)</label><input id="k_bitis" type="date" value="${k?.bitis_tarihi||''}" /></div>
+    <div class="field"><label>Durum</label>
+      <div class="seg">
+        <button type="button" data-durum="aktif" class="${(!k||k?.durum==='aktif')?'on odendi':''}">Aktif</button>
+        <button type="button" data-durum="tamamlandi" class="${k?.durum==='tamamlandi'?'on odenmedi':''}">Tamamlandı</button>
+        <button type="button" data-durum="gelecek" class="${k?.durum==='gelecek'?'on kismi':''}">Gelecek</button>
+      </div>
+    </div>
+    <div class="field"><label>Not</label><textarea id="k_not">${esc(k?.not_metni||'')}</textarea></div>
+    <div class="field">
+      <label>Belge (sözleşme, PDF veya fotoğraf)</label>
+      ${k?.has_belge ? `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;" id="k_belge_row">
+          <button type="button" class="btn btn-ghost" id="k_view_belge" style="flex:1;">${ICON.paperclip} ${esc(k.belge_ad||'Belgeyi Görüntüle')}</button>
+          <button type="button" class="btn btn-danger" id="k_remove_belge">${ICON.x}</button>
+        </div>` : ''}
+      <input id="k_belge_input" type="file" accept=".pdf,.jpg,.jpeg,.png" />
+      <div style="font-size:11px;color:var(--ink-dim);margin-top:6px;">${k?.has_belge?'Yeni bir dosya seçersen mevcut belgenin yerini alır.':'PDF veya fotoğraf yükleyebilirsin (en fazla ~8 MB).'}</div>
+    </div>
+    <div style="display:flex;gap:9px;">
+      ${k?`<button class="btn btn-danger" id="delKontratBtn">${ICON.trash}</button>`:''}
+      <button class="btn btn-primary btn-block" id="saveKontratBtn">Kaydet</button>
+    </div>
+  `;
+  openSheet(html);
+  let tip = k?.tip || 'satilik';
+  document.querySelectorAll('[data-tip]').forEach(b=>{
+    b.onclick = ()=>{
+      document.querySelectorAll('[data-tip]').forEach(x=>x.className='');
+      tip = b.dataset.tip;
+      b.className = 'on odendi';
+    };
+  });
+  let durum = k?.durum || 'aktif';
+  document.querySelectorAll('[data-durum]').forEach(b=>{
+    b.onclick = ()=>{
+      document.querySelectorAll('[data-durum]').forEach(x=>x.className='');
+      durum = b.dataset.durum;
+      const cls = durum==='aktif' ? 'odendi' : (durum==='tamamlandi' ? 'odenmedi' : 'kismi');
+      b.className = 'on '+cls;
+    };
+  });
+  let removeBelge = false;
+  const viewBtn = document.getElementById('k_view_belge');
+  if(viewBtn) viewBtn.onclick = ()=> openContractBelge(k.id);
+  const removeBtn = document.getElementById('k_remove_belge');
+  if(removeBtn) removeBtn.onclick = ()=>{
+    removeBelge = true;
+    showToast('Kaydettiğinde belge kaldırılacak');
+    document.getElementById('k_belge_row').style.opacity = '0.4';
+  };
+
+  document.getElementById('saveKontratBtn').onclick = async ()=>{
+    const fileInput = document.getElementById('k_belge_input');
+    const file = fileInput.files[0];
+    if(file && file.size > 8*1024*1024){ showToast('Dosya çok büyük (en fazla 8 MB)'); return; }
+    const projeSel = document.getElementById('k_proje');
+    const payload = {
+      isletme_id: STATE.currentIsletmeId,
+      mulk_adi: document.getElementById('k_mulk').value || null,
+      tip,
+      karsi_taraf: document.getElementById('k_karsi').value || null,
+      tutar: document.getElementById('k_tutar').value===''?null:Number(document.getElementById('k_tutar').value),
+      baslangic_tarihi: document.getElementById('k_baslangic').value || null,
+      bitis_tarihi: document.getElementById('k_bitis').value || null,
+      durum,
+      not_metni: document.getElementById('k_not').value || null,
+      remove_belge: removeBelge,
+      proje_id: projeSel && projeSel.value ? Number(projeSel.value) : null,
+    };
+    const saveBtnEl = document.getElementById('saveKontratBtn');
+    saveBtnEl.disabled = true; saveBtnEl.textContent = 'Kaydediliyor...';
+    try{
+      if(file){
+        const dataUrl = await new Promise((resolve,reject)=>{
+          const reader = new FileReader();
+          reader.onload = ()=>resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const base64 = dataUrl.split(',')[1];
+        payload.belge_ad = file.name;
+        payload.belge_tip = file.type || 'application/octet-stream';
+        payload.belge_data = base64;
+      }
+      const data = k
+        ? await api('/api/contracts/'+k.id, {method:'PUT', body:payload})
+        : await api('/api/contracts', {method:'POST', body:payload});
+      if(k){ const idx = STATE.contracts.findIndex(x=>x.id===k.id); STATE.contracts[idx]=data; }
+      else STATE.contracts.unshift(data);
+      closeSheet(); showToast('Kaydedildi'); renderMain();
+    }catch(err){ showToast('Kaydedilemedi: '+err.message); console.error(err); }
+    finally{ saveBtnEl.disabled=false; saveBtnEl.textContent='Kaydet'; }
+  };
+  const del = document.getElementById('delKontratBtn');
+  if(del) del.onclick = async ()=>{
+    try{
+      await api('/api/contracts/'+k.id, {method:'DELETE'});
+      STATE.contracts = STATE.contracts.filter(x=>x.id!==k.id);
+      closeSheet(); showToast('Silindi'); renderMain();
+    }catch(err){ showToast('Silinemedi: '+err.message); }
+  };
+}
+
+/* ---------------------------- PROJELER TAB (ofis/inşaat — şirket içindeki inşaat/mimarlık projeleri) ---------------------------- */
+const PROJE_DURUM_META = {
+  aktif:      {chip:'odendi',   label:'Aktif'},
+  tamamlandi: {chip:'odenmedi', label:'Tamamlandı'},
+  beklemede:  {chip:'kismi',    label:'Beklemede'},
+};
+function projeDurumChip(durum){
+  const meta = PROJE_DURUM_META[durum] || PROJE_DURUM_META.aktif;
+  return `<span class="chip ${meta.chip}">${meta.label}</span>`;
+}
+
+// pid: 'genel' -> proje_id boş olan (Ofis Geneli) kayıtlar; sayı -> o projeye ait kayıtlar
+function kayitlarForProje(pid){
+  const match = (proje_id)=> pid==='genel' ? !proje_id : proje_id===pid;
+  return {
+    gelirler: STATE.gelirler.filter(g=>match(g.proje_id)),
+    expenses: STATE.expenses.filter(e=>match(e.proje_id)),
+    contracts: STATE.contracts.filter(k=>match(k.proje_id)),
+  };
+}
+function projeOzetSayilari(pid){
+  const {gelirler, expenses} = kayitlarForProje(pid);
+  const gelir = gelirler.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+  const gider = expenses.filter(e=>e.durum==='ÖDENDİ').reduce((s,e)=>s+(Number(e.tutar)||0),0);
+  return {gelir, gider, net: gelir-gider};
+}
+
+function renderProjeler(){
+  if(STATE.projeView===null || STATE.projeView===undefined) return renderProjelerListesi();
+  return renderProjeDetay(STATE.projeView);
+}
+
+function renderProjelerListesi(){
+  const genelOzet = projeOzetSayilari('genel');
+  const rows = STATE.projeler.map(p=>({p, ozet:projeOzetSayilari(p.id)}));
+  const toplamGelir = genelOzet.gelir + rows.reduce((s,r)=>s+r.ozet.gelir,0);
+  const toplamGider = genelOzet.gider + rows.reduce((s,r)=>s+r.ozet.gider,0);
+  return `
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Proje</div><div class="val">${STATE.projeler.length}</div></div>
+      <div class="kpi good"><div class="lbl">Aktif Proje</div><div class="val">${STATE.projeler.filter(p=>p.durum==='aktif').length}</div></div>
+      <div class="kpi ${(toplamGelir-toplamGider)>=0?'good':'bad'}"><div class="lbl">Şirket Toplam Net</div><div class="val">${tl(toplamGelir-toplamGider)}</div></div>
+    </div>
+
+    <div class="section-title">Ofis Geneli</div>
+    <div class="apt-row" data-open-proje="genel">
+      <div class="apt-no" style="border-radius:11px;">${ICON.reportIcon}</div>
+      <div class="apt-info">
+        <div class="name">Ofis Geneli</div>
+        <div class="kat">Belirli bir projeye bağlı olmayan gelir, gider ve kontratlar</div>
+      </div>
+      <div class="apt-amount" style="text-align:right;">
+        <div style="font-weight:700;color:${genelOzet.net>=0?'var(--success)':'var(--danger)'};">${tl(genelOzet.net)}</div>
+        <div style="font-size:10.5px;">net</div>
+      </div>
+      ${ICON.chevron}
+    </div>
+
+    <div class="section-title">Projeler</div>
+    ${!STATE.projeler.length ? `<div class="empty">${ICON.proje}<div><b>Henüz proje eklenmedi</b><br>Üstteki "Yeni Proje" ile ilk inşaat/mimarlık projenizi ekleyin.</div></div>` : `
+    <div class="row-list">
+      ${rows.map(({p,ozet})=>`
+        <div class="apt-row" data-open-proje="${p.id}">
+          <div class="apt-no" style="border-radius:11px;">${ICON.proje}</div>
+          <div class="apt-info">
+            <div class="name">${esc(p.ad)}</div>
+            <div class="kat">${PROJE_DURUM_META[p.durum]?.label||'Aktif'}${p.aciklama?' · '+esc(p.aciklama):''}</div>
+          </div>
+          <div class="apt-amount" style="text-align:right;">
+            <div style="font-weight:700;color:${ozet.net>=0?'var(--success)':'var(--danger)'};">${tl(ozet.net)}</div>
+            <div style="font-size:10.5px;">net</div>
+          </div>
+          ${ICON.chevron}
+        </div>`).join('')}
+    </div>`}
+  `;
+}
+
+function renderProjeDetay(pid){
+  const isGenel = pid==='genel';
+  const proje = isGenel ? null : STATE.projeler.find(p=>p.id===pid);
+  if(!isGenel && !proje){ STATE.projeView=null; return renderProjelerListesi(); }
+  const {gelirler, expenses, contracts} = kayitlarForProje(pid);
+  const ozet = projeOzetSayilari(pid);
+  const baslik = isGenel ? 'Ofis Geneli' : proje.ad;
+
+  return `
+    <button class="btn-toolbar" id="projeBackBtn" type="button" style="margin-bottom:14px;">${ICON.chevronLeft} Tüm Projeler</button>
+
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+      <div>
+        <h2 style="font-family:var(--font-display);font-size:18px;">${esc(baslik)}</h2>
+        ${!isGenel
+          ? `<div style="font-size:12px;color:var(--ink-dim);margin-top:4px;display:flex;align-items:center;gap:6px;">${projeDurumChip(proje.durum)}${proje.aciklama?'<span>· '+esc(proje.aciklama)+'</span>':''}</div>`
+          : `<div style="font-size:12px;color:var(--ink-dim);margin-top:4px;">Belirli bir projeye bağlı olmayan şirket kayıtları</div>`}
+      </div>
+      ${!isGenel ? `<button class="btn-toolbar" id="projeEditBtn" type="button">Düzenle</button>` : ''}
+    </div>
+
+    <div class="kpis" style="margin-top:14px;">
+      <div class="kpi good"><div class="lbl">Gelir</div><div class="val">${tl(ozet.gelir)}</div></div>
+      <div class="kpi bad"><div class="lbl">Gider</div><div class="val">${tl(ozet.gider)}</div></div>
+      <div class="kpi ${ozet.net>=0?'good':'bad'}"><div class="lbl">Net</div><div class="val">${tl(ozet.net)}</div></div>
+    </div>
+
+    <div class="section-title">Gelirler<button class="btn-toolbar" data-add-proje-gelir type="button" style="margin-left:auto;">${ICON.plus} Gelir Ekle</button></div>
+    ${!gelirler.length ? `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>` : `
+    <div class="table-card" style="margin-bottom:8px;">
+      <div class="table-scroll"><table class="table-pro">
+        <thead><tr><th>Açıklama</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+        <tbody>${gelirler.map(g=>`<tr data-open-gelir="${g.id}"><td class="name-cell">${esc(g.aciklama||'—')}</td><td>${g.tarih?new Date(g.tarih).toLocaleDateString('tr-TR'):'—'}</td><td class="num">${tl(g.tutar)}</td><td>${statusChip(g.durum)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>`}
+
+    <div class="section-title">Giderler<button class="btn-toolbar" data-add-proje-gider type="button" style="margin-left:auto;">${ICON.plus} Gider Ekle</button></div>
+    ${!expenses.length ? `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>` : `
+    <div class="table-card" style="margin-bottom:8px;">
+      <div class="table-scroll"><table class="table-pro">
+        <thead><tr><th>Gider Türü</th><th>Firma</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+        <tbody>${expenses.map(e=>`<tr data-open-exp="${e.id}"><td class="name-cell">${esc(e.gider_turu||'—')}</td><td>${esc(e.firma||'—')}</td><td>${e.tarih?new Date(e.tarih).toLocaleDateString('tr-TR'):'—'}</td><td class="num">${tl(e.tutar)}</td><td>${statusChip(e.durum)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>`}
+
+    <div class="section-title">Kontratlar<button class="btn-toolbar" data-add-proje-kontrat type="button" style="margin-left:auto;">${ICON.plus} Kontrat Ekle</button></div>
+    ${!contracts.length ? `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>` : `
+    <div class="table-card">
+      <div class="table-scroll"><table class="table-pro">
+        <thead><tr><th>Mülk</th><th>Tip</th><th>Karşı Taraf</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+        <tbody>${contracts.map(k=>`<tr data-open-kontrat="${k.id}"><td class="name-cell">${esc(k.mulk_adi||'—')}</td><td>${kontratTipLabel(k.tip)}</td><td>${esc(k.karsi_taraf||'—')}</td><td class="num">${tl(k.tutar)}</td><td>${kontratDurumChip(k.durum)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>`}
+  `;
+}
+
+function openProjeSheet(id){
+  const p = (id && id!=='genel') ? STATE.projeler.find(x=>x.id===id) : null;
+  const html = `
+    <div class="sheet-head">
+      <h2>${p?'Projeyi Düzenle':'Yeni Proje'}</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <div class="field"><label>Proje Adı</label><input id="pr_ad" value="${esc(p?.ad||'')}" placeholder="örn. Bahçelievler Sitesi, Marmaris Villaları" /></div>
+    <div class="field"><label>Açıklama (varsa)</label><textarea id="pr_aciklama">${esc(p?.aciklama||'')}</textarea></div>
+    <div class="field"><label>Durum</label>
+      <div class="seg">
+        <button type="button" data-durum="aktif" class="${(!p||p?.durum==='aktif')?'on odendi':''}">Aktif</button>
+        <button type="button" data-durum="tamamlandi" class="${p?.durum==='tamamlandi'?'on odenmedi':''}">Tamamlandı</button>
+        <button type="button" data-durum="beklemede" class="${p?.durum==='beklemede'?'on kismi':''}">Beklemede</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:9px;">
+      ${p?`<button class="btn btn-danger" id="delProjeBtn">${ICON.trash}</button>`:''}
+      <button class="btn btn-primary btn-block" id="saveProjeBtn">Kaydet</button>
+    </div>
+  `;
+  openSheet(html);
+  let durum = p?.durum || 'aktif';
+  document.querySelectorAll('[data-durum]').forEach(b=>{
+    b.onclick = ()=>{
+      document.querySelectorAll('[data-durum]').forEach(x=>x.className='');
+      durum = b.dataset.durum;
+      const cls = durum==='aktif' ? 'odendi' : (durum==='tamamlandi' ? 'odenmedi' : 'kismi');
+      b.className = 'on '+cls;
+    };
+  });
+  document.getElementById('saveProjeBtn').onclick = async ()=>{
+    const ad = document.getElementById('pr_ad').value.trim();
+    if(!ad){ showToast('Proje adı gerekli'); return; }
+    const payload = { isletme_id: STATE.currentIsletmeId, ad, aciklama: document.getElementById('pr_aciklama').value || null, durum };
+    try{
+      const data = p
+        ? await api('/api/projeler/'+p.id, {method:'PUT', body:payload})
+        : await api('/api/projeler', {method:'POST', body:payload});
+      if(p){ const idx = STATE.projeler.findIndex(x=>x.id===p.id); STATE.projeler[idx]=data; }
+      else STATE.projeler.unshift(data);
+      closeSheet(); showToast('Kaydedildi'); renderMain();
+    }catch(err){ showToast('Kaydedilemedi: '+err.message); }
+  };
+  const del = document.getElementById('delProjeBtn');
+  if(del) del.onclick = async ()=>{
+    try{
+      await api('/api/projeler/'+p.id, {method:'DELETE'});
+      STATE.projeler = STATE.projeler.filter(x=>x.id!==p.id);
+      closeSheet(); showToast('Silindi'); STATE.projeView=null; renderMain();
+    }catch(err){ showToast('Silinemedi: '+err.message); }
+  };
+}
+
+/* ---------------------------- PERSONEL TAB ---------------------------- */
+function renderPersonel(){
+  if(!STATE.staff.length){
+    return `<div class="empty">${ICON.users}<div><b>Henüz personel kaydı yok</b><br>Üstteki "Yeni Personel" ile ilk kaydı ekleyin.</div></div>`;
+  }
+  const toplam = STATE.staff.reduce((s,p)=>s+(Number(p.aylik_ucret)||0),0);
+  return `
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">Toplam Personel</div><div class="val">${STATE.staff.length}</div></div>
+      <div class="kpi good"><div class="lbl">Toplam Aylık Ücret (bilinen)</div><div class="val">${tl(toplam)}</div></div>
+    </div>
+    <div class="table-card">
+      <div class="table-card-head"><h2>Personel Listesi</h2></div>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr><th>İsim</th><th>Görev</th><th class="num">Aylık Ücret</th><th>${STATE.currentMonth? monthLabel(STATE.currentMonth)+' Durumu' : 'Bu Ay'}</th></tr></thead>
+          <tbody>
+            ${STATE.staff.map(p=>{
+              const thisMonthPay = STATE.currentMonth ? STATE.staffPayments.find(sp=>sp.staff_id===p.id && sp.ay===STATE.currentMonth) : null;
+              return `<tr data-open-staff="${p.id}">
+                <td class="name-cell">${p.isim ? esc(p.isim) : esc(p.gorev)}</td>
+                <td>${p.isim ? esc(p.gorev) : '—'}</td>
+                <td class="num">${tl(p.aylik_ucret)}</td>
+                <td>${thisMonthPay ? statusChip(thisMonthPay.durum) : (STATE.currentMonth? statusChip('ÖDENMEDİ'):'—')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="table-foot-row"><span>${STATE.staff.length} personel</span><span>Toplam aylık ücret: ${tl(toplam)}</span></div>
+    </div>
+  `;
+}
+
+/* ---------------------------- ASİSTAN TAB ---------------------------- */
+const CHAT_SUGGESTIONS = [
+  'Bu ay kimler ödemedi?',
+  'Toplam gider ne kadar?',
+  'Kontrol edilmesi gereken kayıt var mı?',
+];
+
+function renderAsistan(){
+  const hasMsgs = STATE.chat.length>0;
+  return `
+    <div class="chat-wrap">
+      <div class="chat-log" id="chatLog">
+        ${!hasMsgs ? `<div class="empty" style="padding-top:30px;">${ICON.chat}<div><b>Zeytinkule Asistanı</b><br>Aidat, gider ve personel durumu hakkında sorular sorabilirsin.</div></div>` : ''}
+        ${STATE.chat.map(m=>`<div class="msg ${m.role==='user'?'user':'bot'}">${esc(m.content)}</div>`).join('')}
+      </div>
+      ${!hasMsgs ? `<div class="chat-suggest">${CHAT_SUGGESTIONS.map(s=>`<button type="button" data-suggest="${esc(s)}">${s}</button>`).join('')}</div>` : ''}
+      <div class="chat-input-bar">
+        <input id="chatInput" placeholder="Bir şey sor..." autocomplete="off" />
+        <button id="chatSendBtn">${ICON.send}</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireAsistan(){
+  const log = document.getElementById('chatLog');
+  if(log) log.scrollTop = log.scrollHeight;
+  const input = document.getElementById('chatInput');
+  const send = document.getElementById('chatSendBtn');
+  const go = ()=> sendChat(input.value);
+  send.onclick = go;
+  input.onkeydown = (e)=>{ if(e.key==='Enter') go(); };
+  document.querySelectorAll('[data-suggest]').forEach(b=>{
+    b.onclick = ()=> sendChat(b.dataset.suggest);
+  });
+}
+
+async function sendChat(text){
+  text = (text||'').trim();
+  if(!text) return;
+  STATE.chat.push({role:'user', content:text});
+  renderMain();
+  const log = document.getElementById('chatLog');
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'msg bot loading';
+  loadingEl.textContent = 'Yazıyor...';
+  log.appendChild(loadingEl);
+  log.scrollTop = log.scrollHeight;
+  try{
+    const history = STATE.chat.slice(0,-1).map(m=>({role:m.role, content:m.content}));
+    const data = await api('/api/chat', {method:'POST', body:{message:text, history, isletme_id:STATE.currentIsletmeId}});
+    STATE.chat.push({role:'assistant', content:data.response});
+  }catch(err){
+    STATE.chat.push({role:'assistant', content:'Bir hata oldu: '+err.message});
+  }
+  renderMain();
+}
+
+/* ---------------------------- EVENT WIRING ---------------------------- */
+function wireMain(){
+  const search = document.getElementById('searchInput');
+  if(search){
+    search.oninput = (e)=>{ STATE.search = e.target.value; renderMain();
+      const el=document.getElementById('searchInput'); if(el){el.focus(); el.setSelectionRange(el.value.length,el.value.length);} };
+  }
+  document.querySelectorAll('[data-open-apt]').forEach(el=>{
+    el.onclick = ()=> openApartmentSheet(Number(el.dataset.openApt));
+  });
+  document.querySelectorAll('[data-open-exp]').forEach(el=>{
+    el.onclick = ()=> openExpenseSheet(Number(el.dataset.openExp));
+  });
+  document.querySelectorAll('[data-open-gelir]').forEach(el=>{
+    el.onclick = ()=> openGelirSheet(Number(el.dataset.openGelir));
+  });
+  document.querySelectorAll('[data-open-staff]').forEach(el=>{
+    el.onclick = ()=> openStaffSheet(Number(el.dataset.openStaff));
+  });
+  document.querySelectorAll('[data-open-kontrat]').forEach(el=>{
+    el.onclick = ()=> openContractSheet(Number(el.dataset.openKontrat));
+  });
+  document.querySelectorAll('[data-open-proje]').forEach(el=>{
+    el.onclick = ()=>{
+      const val = el.dataset.openProje;
+      STATE.projeView = val==='genel' ? 'genel' : Number(val);
+      renderMain();
+    };
+  });
+  document.querySelectorAll('[data-goto-proje]').forEach(el=>{
+    el.onclick = ()=>{
+      STATE.tab = 'projeler';
+      STATE.projeView = Number(el.dataset.gotoProje);
+      render();
+    };
+  });
+  const projeBackBtn = document.getElementById('projeBackBtn');
+  if(projeBackBtn) projeBackBtn.onclick = ()=>{ STATE.projeView = null; renderMain(); };
+  const projeEditBtn = document.getElementById('projeEditBtn');
+  if(projeEditBtn) projeEditBtn.onclick = ()=> openProjeSheet(STATE.projeView);
+  const addProjeGelirBtn = document.querySelector('[data-add-proje-gelir]');
+  if(addProjeGelirBtn) addProjeGelirBtn.onclick = ()=> openGelirSheet(null, STATE.projeView==='genel'?null:STATE.projeView);
+  const addProjeGiderBtn = document.querySelector('[data-add-proje-gider]');
+  if(addProjeGiderBtn) addProjeGiderBtn.onclick = ()=> openExpenseSheet(null, STATE.projeView==='genel'?null:STATE.projeView);
+  const addProjeKontratBtn = document.querySelector('[data-add-proje-kontrat]');
+  if(addProjeKontratBtn) addProjeKontratBtn.onclick = ()=> openContractSheet(null, STATE.projeView==='genel'?null:STATE.projeView);
+  const reportsBtn = document.getElementById('openReportsBtn');
+  if(reportsBtn) reportsBtn.onclick = openReportsHub;
+  const aidatBtn = document.getElementById('openAidatTutariBtn');
+  if(aidatBtn) aidatBtn.onclick = openAidatTutariSheet;
+}
+
+/* ---------------------------- SHEET (bottom modal) SYSTEM ---------------------------- */
+function openSheet(innerHtml){
+  closeSheet();
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.id = 'overlay';
+  ov.innerHTML = `<div class="sheet"><div class="sheet-handle"></div>${innerHtml}</div>`;
+  ov.onclick = (e)=>{ if(e.target===ov) closeSheet(); };
+  document.body.appendChild(ov);
+  requestAnimationFrame(()=> ov.classList.add('open'));
+  document.body.style.overflow = 'hidden';
+}
+function closeSheet(){
+  const ov = document.getElementById('overlay');
+  if(ov){ ov.remove(); }
+  document.body.style.overflow = '';
+}
+document.addEventListener('click', (e)=>{
+  if(e.target.closest('[data-close-sheet]')) closeSheet();
+});
+/* ---------------------------- DAİRE DETAY SHEET ---------------------------- */
+function periodRowsForApartment(no){
+  const rows = [];
+  const dem = paymentFor(no,'demirbas','tek');
+  rows.push({key:'demirbas|tek', tur:'demirbas', donem:'tek', label:'Demirbaş', row: dem});
+  STATE.months.forEach(m=>{
+    rows.push({key:'aidat|'+m, tur:'aidat', donem:m, label:monthLabel(m)+' Aidatı', row: paymentFor(no,'aidat',m)});
+  });
+  return rows;
+}
+
+function openApartmentSheet(no){
+  const a = STATE.apartments.find(x=>x.no===no);
+  if(!a) return;
+  const rows = periodRowsForApartment(no);
+  const bal = computeAptBalance(no);
+  const durumOptions = Object.entries(DURUM_META);
+  const html = `
+    <div class="sheet-head">
+      <div>
+        <h2>Daire ${a.no}</h2>
+        <div class="sheet-sub" style="margin:2px 0 0;">${esc(a.malik||'—')} · ${esc((a.kat||'').replace('.NORMAL KAT','. Kat'))}</div>
+      </div>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+
+    <div class="stat-grid" style="margin-bottom:18px;">
+      <div class="stat-card"><div class="label">Toplam Borç</div><div class="value small">${bal.muaf?'—':tl(bal.borc)}</div></div>
+      <div class="stat-card"><div class="label">Ödenen</div><div class="value small">${bal.muaf?'—':tl(bal.odenen)}</div></div>
+      <div class="stat-card" style="grid-column:1 / -1;"><div class="label">Kalan Bakiye</div><div class="value" style="color:${bal.muaf?'inherit':(bal.kalan>0?'var(--danger)':'var(--success)')};">${bal.muaf?'Aidattan Muaf':tl(bal.kalan)}</div></div>
+    </div>
+
+    <div class="card" style="padding:14px;margin-bottom:16px;">
+      <div class="section-title" style="margin:0 0 10px;">Daire Durumu</div>
+      <div class="seg" data-role="durumSeg">
+        ${durumOptions.map(([k,m])=>`<button type="button" data-durum="${k}" class="${a.durum===k?'on odendi':''}" style="min-width:100%;">${m.label}</button>`).join('')}
+      </div>
+      <div class="field" id="kiraciAdiField" style="margin-top:12px;${a.durum==='kiraci'?'':'display:none;'}">
+        <label>Kiracı Adı</label>
+        <input id="kiraciAdiInput" value="${esc(a.kiraci_adi||'')}" placeholder="örn. Ahmet Yılmaz" />
+      </div>
+      <button class="btn btn-ghost btn-block" id="saveDurumBtn" style="margin-top:12px;">Daire Durumunu Kaydet</button>
+    </div>
+
+    <div class="section-title" style="margin-top:0;">Dönem Kayıtları</div>
+    <div id="periodList" class="row-list">
+      ${rows.map(r=>periodEditBlock(no, r)).join('')}
+    </div>
+  `;
+  openSheet(html);
+  wirePeriodBlocks(no);
+  wireDurumBlock(no, a);
+}
+
+function wireDurumBlock(no, a){
+  const seg = document.querySelector('[data-role="durumSeg"]');
+  let pendingDurum = a.durum || 'ev_sahibi';
+  const kiraciField = document.getElementById('kiraciAdiField');
+  seg.querySelectorAll('button').forEach(btn=>{
+    btn.onclick = ()=>{
+      seg.querySelectorAll('button').forEach(b=>b.className='');
+      btn.className = 'on odendi';
+      pendingDurum = btn.dataset.durum;
+      kiraciField.style.display = pendingDurum==='kiraci' ? '' : 'none';
+    };
+  });
+  document.getElementById('saveDurumBtn').onclick = async ()=>{
+    const payload = { durum: pendingDurum, kiraci_adi: pendingDurum==='kiraci' ? (document.getElementById('kiraciAdiInput').value||null) : null };
+    try{
+      const data = await api('/api/apartments/'+no+'?isletme_id='+STATE.currentIsletmeId, {method:'PUT', body:payload});
+      const idx = STATE.apartments.findIndex(x=>x.no===no);
+      if(idx>=0) STATE.apartments[idx] = data;
+      showToast('Kaydedildi');
+      openApartmentSheet(no);
+      renderMain();
+    }catch(err){ showToast('Kaydedilemedi: '+err.message); }
+  };
+}
+
+function periodEditBlock(no, r){
+  const row = r.row;
+  const durum = row ? row.durum : 'ÖDENMEDİ';
+  const tutar = row ? row.tutar_odenen : '';
+  const not_ = row ? (row.not_metni||'') : '';
+  const statuses = r.tur==='aidat'
+    ? ['ÖDENMEDİ','ÖDENDİ','KISMİ ÖDENDİ','VERMİYOR']
+    : ['ÖDENMEDİ','ÖDENDİ','KISMİ ÖDENDİ'];
+  const meta = STATUS_META;
+  return `
+  <div class="card" style="padding:14px;" data-period="${r.key}">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <b style="font-size:13.5px;">${r.label}</b>
+      ${row && row.kaynak && row.kaynak!=='-' && row.kaynak!=='Dijital kayıt' ? `<span style="font-size:10.5px;color:var(--warning);font-weight:700;">${esc(row.kaynak)}</span>`:''}
+    </div>
+    <div class="seg" data-role="statusSeg">
+      ${statuses.map(s=>`<button type="button" data-status="${s}" class="${s===durum?'on '+meta[s].chip:''}">${meta[s].label}</button>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <input type="number" inputmode="decimal" data-role="tutar" placeholder="Tutar (₺)" value="${tutar!==null&&tutar!==undefined?tutar:''}" style="flex:1;border:1px solid var(--line);background:var(--surface-2);border-radius:11px;padding:10px 11px;font:inherit;color:var(--ink);" />
+      <button type="button" class="btn btn-primary" data-role="save" style="flex:none;">Kaydet</button>
+    </div>
+    ${row && row.not_metni ? `<div style="font-size:11.5px;color:var(--ink-dim);margin-top:8px;">${esc(row.not_metni)}</div>`:''}
+  </div>`;
+}
+
+function wirePeriodBlocks(no){
+  document.querySelectorAll('[data-period]').forEach(block=>{
+    const seg = block.querySelector('[data-role="statusSeg"]');
+    seg.querySelectorAll('button').forEach(btn=>{
+      btn.onclick = ()=>{
+        seg.querySelectorAll('button').forEach(b=>{ b.className=''; });
+        const s = btn.dataset.status;
+        btn.className = 'on ' + STATUS_META[s].chip;
+        block.dataset.pendingStatus = s;
+      };
+    });
+    block.querySelector('[data-role="save"]').onclick = async ()=>{
+      const [tur,donem] = block.dataset.period.split('|');
+      const status = block.dataset.pendingStatus || seg.querySelector('button.on')?.dataset.status || 'ÖDENMEDİ';
+      const tutarVal = block.querySelector('[data-role="tutar"]').value;
+      await savePayment(no, tur, donem, status, tutarVal===''?null:Number(tutarVal));
+    };
+  });
+}
+
+async function savePayment(no, tur, donem, durum, tutar){
+  try{
+    const data = await api('/api/payments/upsert', {method:'POST', body:{isletme_id:STATE.currentIsletmeId, apartment_no:no, tur, donem, tutar_odenen:tutar, durum}});
+    const idx = STATE.payments.findIndex(p=>p.apartment_no===no && p.tur===tur && p.donem===donem);
+    if(idx>=0) STATE.payments[idx] = data; else STATE.payments.push(data);
+    showToast('Kaydedildi');
+    renderMain();
+  }catch(err){ showToast('Kaydedilemedi: '+err.message); console.error(err); }
+}
+
+/* ---------------------------- YENİ AY EKLE ---------------------------- */
+function openAddMonthSheet(){
+  const html = `
+    <div class="sheet-head">
+      <h2>Yeni Ay Ekle</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <p style="color:var(--ink-dim);font-size:13px;margin-top:-8px;">Seçtiğiniz ay için tüm dairelere "Ödenmedi" durumunda 71 satır oluşturulur.</p>
+    <div class="field">
+      <label>Ay</label>
+      <input type="month" id="newMonthInput" value="${nowMonth()}" />
+    </div>
+    <button class="btn btn-primary btn-block" id="addMonthBtn">Ayı Oluştur</button>
+  `;
+  openSheet(html);
+  document.getElementById('addMonthBtn').onclick = async ()=>{
+    const val = document.getElementById('newMonthInput').value;
+    if(!val){ showToast('Bir ay seçin'); return; }
+    if(STATE.months.includes(val)){ showToast('Bu ay zaten mevcut'); return; }
+    try{
+      const data = await api('/api/months', {method:'POST', body:{isletme_id:STATE.currentIsletmeId, donem:val}});
+      STATE.payments.push(...data);
+      STATE.months = [...new Set(STATE.payments.filter(x=>x.tur==='aidat').map(x=>x.donem))].sort();
+      STATE.currentMonth = val;
+      closeSheet();
+      showToast(monthLabel(val)+' eklendi');
+      render();
+    }catch(err){ showToast('Oluşturulamadı: '+err.message); console.error(err); }
+  };
+}
+
+/* ---------------------------- GİDER SHEET ---------------------------- */
+function firmaToplam(firma){
+  return STATE.expenses.filter(x=>x.firma===firma && x.durum==='ÖDENDİ').reduce((s,x)=>s+(Number(x.tutar)||0),0);
+}
+
+function openExpenseSheet(id, presetProjeId){
+  const e = id ? STATE.expenses.find(x=>x.id===id) : null;
+  const firmalar = [...new Set(STATE.expenses.map(x=>x.firma).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'tr'));
+  const currentFirma = e?.firma || '';
+  const html = `
+    <div class="sheet-head">
+      <h2>${e?'Gideri Düzenle':'Yeni Gider'}</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <div class="field"><label>Ay</label><input id="f_ay" value="${esc(e?.ay||'')}" placeholder="örn. EYLÜL" /></div>
+    <div class="field"><label>Gider Türü</label><input id="f_tur" value="${esc(e?.gider_turu||'')}" placeholder="örn. Elektrik ve Enerji" /></div>
+    ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="f_proje">${projeSelectHtml(e?e.proje_id:presetProjeId)}</select></div>` : ''}
+    <div class="field">
+      <label>Firma / Abone</label>
+      <select id="f_firma_select">
+        <option value="">— Seçin —</option>
+        ${firmalar.map(f=>`<option value="${esc(f)}" ${f===currentFirma?'selected':''}>${esc(f)}</option>`).join('')}
+        <option value="__yeni__" ${currentFirma && !firmalar.includes(currentFirma) ? 'selected':''}>+ Yeni Firma Ekle</option>
+      </select>
+      <input id="f_firma_yeni" placeholder="Yeni firma adı" value="${esc(currentFirma && !firmalar.includes(currentFirma) ? currentFirma : '')}" style="margin-top:8px;${currentFirma && !firmalar.includes(currentFirma) ? '' : 'display:none;'}" />
+      <div id="f_firma_not" style="font-size:11.5px;color:var(--ink-dim);margin-top:6px;${currentFirma && firmalar.includes(currentFirma) ? '' : 'display:none;'}"></div>
+    </div>
+    <div class="field"><label>Tutar (₺)</label><input id="f_tutar" type="number" inputmode="decimal" value="${e?.tutar??''}" /></div>
+    <div class="field"><label>Ödeme Tarihi</label><input id="f_tarih" type="date" value="${e?.tarih||''}" /></div>
+    <div class="field"><label>Durum</label>
+      <div class="seg">
+        <button type="button" data-d="ÖDENDİ" class="${e?.durum==='ÖDENDİ'?'on odendi':''}">Ödendi</button>
+        <button type="button" data-d="ÖDENMEDİ" class="${(!e||e?.durum==='ÖDENMEDİ')?'on odenmedi':''}">Ödenmedi</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>İlgili Bakım (varsa)</label>
+      <select id="f_bakim_select">
+        <option value="">— Bakımla ilgisi yok —</option>
+        ${STATE.maintenanceItems.map(mi=>`<option value="${mi.id}" ${e?.bakim_id===mi.id?'selected':''}>${esc(mi.ad)}</option>`).join('')}
+        <option value="__yeni__">+ Yeni Bakım Kalemi Ekle</option>
+      </select>
+      <div id="f_bakim_yeni" style="margin-top:8px;display:none;">
+        <input id="f_bakim_ad" placeholder="Bakım adı (örn. Asansör Bakımı)" style="margin-bottom:8px;" />
+        <select id="f_bakim_siklik">
+          <option value="aylik">Her ay</option>
+          <option value="3ayda_bir">3 ayda bir</option>
+          <option value="yillik">Yılda bir</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>Not</label><textarea id="f_not">${esc(e?.not_metni||'')}</textarea></div>
+    <div style="display:flex;gap:9px;">
+      ${e?`<button class="btn btn-danger" id="delBtn">${ICON.trash}</button>`:''}
+      <button class="btn btn-primary btn-block" id="saveExpBtn">Kaydet</button>
+    </div>
+  `;
+  openSheet(html);
+  let durum = e?.durum || 'ÖDENMEDİ';
+  document.querySelectorAll('[data-d]').forEach(b=>{
+    b.onclick = ()=>{
+      document.querySelectorAll('[data-d]').forEach(x=>x.className='');
+      durum = b.dataset.d;
+      b.className = 'on ' + (durum==='ÖDENDİ'?'odendi':'odenmedi');
+    };
+  });
+  const firmaSelect = document.getElementById('f_firma_select');
+  const firmaYeni = document.getElementById('f_firma_yeni');
+  const firmaNot = document.getElementById('f_firma_not');
+  function updateFirmaUI(){
+    if(firmaSelect.value==='__yeni__'){
+      firmaYeni.style.display=''; firmaNot.style.display='none';
+    }else if(firmaSelect.value){
+      firmaYeni.style.display='none';
+      const toplam = firmaToplam(firmaSelect.value);
+      firmaNot.style.display='';
+      firmaNot.textContent = 'Bu firmaya bugüne kadar toplam '+tl(toplam)+' ödendi.';
+    }else{
+      firmaYeni.style.display='none'; firmaNot.style.display='none';
+    }
+  }
+  firmaSelect.onchange = updateFirmaUI;
+  updateFirmaUI();
+
+  const bakimSelect = document.getElementById('f_bakim_select');
+  const bakimYeni = document.getElementById('f_bakim_yeni');
+  bakimSelect.onchange = ()=>{ bakimYeni.style.display = bakimSelect.value==='__yeni__' ? '' : 'none'; };
+
+  document.getElementById('saveExpBtn').onclick = async ()=>{
+    let firma = firmaSelect.value==='__yeni__' ? (firmaYeni.value||null) : (firmaSelect.value||null);
+    let bakim_id = null;
+    if(bakimSelect.value==='__yeni__'){
+      const ad = document.getElementById('f_bakim_ad').value;
+      const siklik = document.getElementById('f_bakim_siklik').value;
+      if(ad){
+        try{
+          const mi = await api('/api/maintenance', {method:'POST', body:{isletme_id:STATE.currentIsletmeId, ad, siklik}});
+          STATE.maintenanceItems.push(mi);
+          bakim_id = mi.id;
+        }catch(err){ showToast('Bakım kalemi eklenemedi: '+err.message); }
+      }
+    }else if(bakimSelect.value){
+      bakim_id = Number(bakimSelect.value);
+    }
+    const projeSel = document.getElementById('f_proje');
+    const payload = {
+      isletme_id: STATE.currentIsletmeId,
+      ay: document.getElementById('f_ay').value || null,
+      gider_turu: document.getElementById('f_tur').value || null,
+      firma,
+      tutar: document.getElementById('f_tutar').value===''?null:Number(document.getElementById('f_tutar').value),
+      tarih: document.getElementById('f_tarih').value || null,
+      durum,
+      bakim_id,
+      not_metni: document.getElementById('f_not').value || null,
+      proje_id: projeSel && projeSel.value ? Number(projeSel.value) : null,
+    };
+    try{
+      const data = e
+        ? await api('/api/expenses/'+e.id, {method:'PUT', body:payload})
+        : await api('/api/expenses', {method:'POST', body:payload});
+      if(e){ const idx = STATE.expenses.findIndex(x=>x.id===e.id); STATE.expenses[idx]=data; }
+      else STATE.expenses.unshift(data);
+      if(bakim_id){
+        try{ STATE.maintenanceItems = (await api('/api/data?isletme_id='+STATE.currentIsletmeId)).maintenanceItems || STATE.maintenanceItems; }catch(err){}
+      }
+      closeSheet(); showToast('Kaydedildi'); renderMain();
+    }catch(err){ showToast('Kaydedilemedi: '+err.message); console.error(err); }
+  };
+  const del = document.getElementById('delBtn');
+  if(del) del.onclick = async ()=>{
+    try{
+      await api('/api/expenses/'+e.id, {method:'DELETE'});
+      STATE.expenses = STATE.expenses.filter(x=>x.id!==e.id);
+      closeSheet(); showToast('Silindi'); renderMain();
+    }catch(err){ showToast('Silinemedi: '+err.message); }
+  };
+}
+
+/* ---------------------------- PERSONEL SHEET ---------------------------- */
+function openStaffSheet(id){
+  const p = id ? STATE.staff.find(x=>x.id===id) : null;
+  const staffMonths = staffMonthsFor();
+  const monthBlocks = p && staffMonths.length ? staffMonths.map(m=>{
+    const sp = STATE.staffPayments.find(x=>x.staff_id===p.id && x.ay===m);
+    return `
+    <div class="card" style="padding:12px 14px;margin-bottom:8px;" data-staffmonth="${m}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <b style="font-size:13px;">${monthLabel(m)}</b>
+      </div>
+      <div class="seg" data-role="spSeg">
+        <button type="button" data-d="ÖDENMEDİ" class="${(!sp||sp.durum==='ÖDENMEDİ')?'on odenmedi':''}">Ödenmedi</button>
+        <button type="button" data-d="ÖDENDİ" class="${sp?.durum==='ÖDENDİ'?'on odendi':''}">Ödendi</button>
+      </div>
+      <input type="date" data-role="spTarih" value="${sp?.tarih||''}" style="margin-top:8px;width:100%;border:1px solid var(--line);background:var(--surface-2);border-radius:11px;padding:9px 10px;font:inherit;color:var(--ink);" />
+      <button type="button" class="btn btn-ghost btn-block" data-role="spSave" style="margin-top:8px;">Bu Ayı Kaydet</button>
+    </div>`;
+  }).join('') : '';
+
+  const html = `
+    <div class="sheet-head">
+      <h2>${p?'Personeli Düzenle':'Yeni Personel'}</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <div class="field"><label>İsim</label><input id="s_isim" value="${esc(p?.isim||'')}" placeholder="örn. Ahmet Yılmaz" /></div>
+    <div class="field"><label>Görev</label><input id="s_gorev" value="${esc(p?.gorev||'')}" placeholder="örn. Gece Güvenlik" /></div>
+    <div class="field"><label>Aylık Ücret (₺)</label><input id="s_ucret" type="number" inputmode="decimal" value="${p?.aylik_ucret??''}" /></div>
+    <button class="btn btn-primary btn-block" id="saveStaffBtn">Kaydet</button>
+    ${p ? `<div class="divider"></div><div class="section-title" style="margin-top:0;">Aylık Ödeme Durumu</div>${monthBlocks || '<p style="color:var(--ink-dim);font-size:13px;">Henüz ay eklenmedi.</p>'}` : ''}
+  `;
+  openSheet(html);
+  document.getElementById('saveStaffBtn').onclick = async ()=>{
+    const payload = {
+      isletme_id: STATE.currentIsletmeId,
+      isim: document.getElementById('s_isim').value || null,
+      gorev: document.getElementById('s_gorev').value || null,
+      aylik_ucret: document.getElementById('s_ucret').value===''?null:Number(document.getElementById('s_ucret').value),
+    };
+    try{
+      const data = p
+        ? await api('/api/staff/'+p.id, {method:'PUT', body:payload})
+        : await api('/api/staff', {method:'POST', body:payload});
+      if(p){ const idx = STATE.staff.findIndex(x=>x.id===p.id); STATE.staff[idx]=data; }
+      else STATE.staff.push(data);
+      closeSheet(); showToast('Kaydedildi'); renderMain();
+    }catch(err){ showToast('Kaydedilemedi: '+err.message); }
+  };
+  document.querySelectorAll('[data-staffmonth]').forEach(block=>{
+    const seg = block.querySelector('[data-role="spSeg"]');
+    let durum = seg.querySelector('button.on')?.dataset.d || 'ÖDENMEDİ';
+    seg.querySelectorAll('button').forEach(b=>{
+      b.onclick = ()=>{
+        seg.querySelectorAll('button').forEach(x=>x.className='');
+        durum = b.dataset.d;
+        b.className = 'on ' + (durum==='ÖDENDİ'?'odendi':'odenmedi');
+      };
+    });
+    block.querySelector('[data-role="spSave"]').onclick = async ()=>{
+      const ay = block.dataset.staffmonth;
+      const tarih = block.querySelector('[data-role="spTarih"]').value || null;
+      try{
+        const data = await api('/api/staff-payments/upsert', {method:'POST', body:{staff_id:p.id, ay, durum, tarih}});
+        const idx = STATE.staffPayments.findIndex(x=>x.staff_id===p.id && x.ay===ay);
+        if(idx>=0) STATE.staffPayments[idx]=data; else STATE.staffPayments.push(data);
+        showToast('Kaydedildi');
+      }catch(err){ showToast('Kaydedilemedi: '+err.message); }
+    };
+  });
+}
+
+/* ---------------------------- AYARLAR (settings) ---------------------------- */
+async function loadSettings(){
+  try{
+    STATE.settings = await api('/api/settings?isletme_id='+STATE.currentIsletmeId);
+  }catch(err){ console.error(err); }
+  STATE.settingsLoaded = true;
+}
+async function saveSetting(key, value){
+  try{
+    await api('/api/settings/'+key, {method:'PUT', body:{value, isletme_id:STATE.currentIsletmeId}});
+    STATE.settings[key] = value;
+  }catch(err){ showToast('Kaydedilemedi: '+err.message); }
+}
+
+/* ---------------------------- RAPORLAR VE BELGELER ---------------------------- */
+async function openReportsHub(){
+  if(!STATE.settingsLoaded) await loadSettings();
+  const site = isSiteTipi();
+  const html = `
+    <div class="sheet-head">
+      <h2>Raporlar ve Belgeler</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <div class="row-list">
+      <div class="apt-row" data-report="gelirgider">
+        <div class="report-icon">${ICON.reportIcon}</div>
+        <div class="apt-info"><div class="name">Gelir-Gider Tablosu</div><div class="kat">Toplam tahsilat ve gider özeti</div></div>
+        ${ICON.chevron}
+      </div>
+      <div class="apt-row" data-report="yillik">
+        <div class="report-icon">${ICON.calendar}</div>
+        <div class="apt-info"><div class="name">Yıllık Karşılaştırma</div><div class="kat">Bu yıl ile geçen yılın karşılaştırması</div></div>
+        ${ICON.chevron}
+      </div>
+      <div class="apt-row" data-report="ekstre">
+        <div class="report-icon">${ICON.reportIcon}</div>
+        <div class="apt-info"><div class="name">Cari Hesap Ekstresi</div><div class="kat">Bir firmaya yapılan tüm ödemelerin dökümü</div></div>
+        ${ICON.chevron}
+      </div>
+      ${site ? `
+      <div class="apt-row" data-report="isletme">
+        <div class="report-icon">${ICON.calculator}</div>
+        <div class="apt-info"><div class="name">İşletme Projesi Hesaplayıcı</div><div class="kat">Yeni dönem aidatını hesapla</div></div>
+        ${ICON.chevron}
+      </div>
+      <div class="apt-row" data-report="genelkurul">
+        <div class="report-icon">${ICON.users}</div>
+        <div class="apt-info"><div class="name">Genel Kurul Özet Raporu</div><div class="kat">Toplantı için yazdırılabilir özet</div></div>
+        ${ICON.chevron}
+      </div>
+      <div class="apt-row" data-report="yasal">
+        <div class="report-icon">${ICON.gavel}</div>
+        <div class="apt-info"><div class="name">Yasal Belgeler</div><div class="kat">Tutulması gereken defter ve belgeler</div></div>
+        ${ICON.chevron}
+      </div>` : ''}
+    </div>
+  `;
+  openSheet(html);
+  document.querySelectorAll('[data-report]').forEach(el=>{
+    el.onclick = ()=>{
+      const r = el.dataset.report;
+      if(r==='gelirgider') openGelirGiderReport();
+      else if(r==='yillik') openYillikKarsilastirmaReport();
+      else if(r==='ekstre') openCariEkstreSheet();
+      else if(r==='isletme') openIsletmeProjesiSheet();
+      else if(r==='genelkurul') openGenelKurulReport();
+      else if(r==='yasal') openYasalBelgelerSheet();
+    };
+  });
+}
+
+function reportBackClose(){
+  return `<button class="close" data-close-sheet>${ICON.x}</button>`;
+}
+
+function computeGelirGider(){
+  const site = isSiteTipi();
+  const aidatRows = site ? STATE.payments.filter(p=>p.tur==='aidat') : [];
+  const aidatToplam = aidatRows.reduce((s,p)=>s+(Number(p.tutar_odenen)||0),0);
+  const demirbasRows = site ? STATE.payments.filter(p=>p.tur==='demirbas') : [];
+  const demirbasToplam = demirbasRows.reduce((s,p)=>s+(Number(p.tutar_odenen)||0),0);
+  const gelirlerToplam = site ? 0 : STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+  const gelirToplam = aidatToplam + demirbasToplam + gelirlerToplam;
+
+  const aidatByMonth = STATE.months.map(m=>({
+    donem: m,
+    tutar: aidatRows.filter(p=>p.donem===m).reduce((s,p)=>s+(Number(p.tutar_odenen)||0),0),
+  }));
+
+  const giderRows = STATE.expenses.filter(e=>e.durum==='ÖDENDİ');
+  const giderToplam = giderRows.reduce((s,e)=>s+(Number(e.tutar)||0),0);
+  const giderByTur = {};
+  giderRows.forEach(e=>{ const k=e.gider_turu||'Diğer'; giderByTur[k]=(giderByTur[k]||0)+(Number(e.tutar)||0); });
+
+  const personelOdemeToplam = STATE.staffPayments.filter(sp=>sp.durum==='ÖDENDİ').reduce((s,sp)=>{
+    const st = STATE.staff.find(x=>x.id===sp.staff_id);
+    return s + (st ? Number(st.aylik_ucret)||0 : 0);
+  },0);
+
+  const giderGenelToplam = giderToplam + personelOdemeToplam;
+  const net = gelirToplam - giderGenelToplam;
+
+  // Aylık gelir trendi (grafik için) — site'de aidat, genel'de tarihli gelir kayıtları
+  let gelirTrend;
+  if(site){
+    gelirTrend = aidatByMonth.map(r=>({key:r.donem, label:monthLabel(r.donem), short:(MONTH_NAMES[r.donem.slice(5,7)]||'').slice(0,3), tutar:r.tutar}));
+  }else{
+    const byMonth = {};
+    STATE.gelirler.filter(g=>g.durum==='ÖDENDİ' && g.tarih).forEach(g=>{
+      const key = g.tarih.slice(0,7);
+      byMonth[key] = (byMonth[key]||0) + (Number(g.tutar)||0);
+    });
+    gelirTrend = Object.keys(byMonth).sort().map(key=>({key, label:monthLabel(key), short:(MONTH_NAMES[key.slice(5,7)]||'').slice(0,3), tutar:byMonth[key]}));
+  }
+
+  return {aidatToplam, demirbasToplam, gelirlerToplam, gelirToplam, aidatByMonth, giderToplam, giderByTur, personelOdemeToplam, giderGenelToplam, net, gelirTrend};
+}
+
+/* ---------------------------- BAĞIMSIZ SVG GRAFİKLER ---------------------------- */
+function svgBarChart(rows, opts){
+  opts = opts||{};
+  const w = opts.width||320, h = opts.height||150, padL=6, padR=6, padT=10, padB=22;
+  const innerW = w-padL-padR, innerH = h-padT-padB;
+  if(!rows.length) return `<p style="font-size:12.5px;color:var(--ink-dim);">Grafik için yeterli veri yok.</p>`;
+  const max = Math.max(...rows.map(r=>r.tutar), 1);
+  const bw = innerW/rows.length;
+  const bars = rows.map((r,i)=>{
+    const bh = max>0 ? (r.tutar/max)*innerH : 0;
+    const x = padL + i*bw + bw*0.18;
+    const y = padT + (innerH-bh);
+    const bw2 = bw*0.64;
+    const lbl = r.short || (r.label||'').split(' ')[0].slice(0,3);
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw2.toFixed(1)}" height="${bh.toFixed(1)}" rx="2.5" fill="${r.color||'var(--brand)'}"></rect>
+      <text x="${(x+bw2/2).toFixed(1)}" y="${h-7}" text-anchor="middle" font-size="8.5" fill="var(--ink-dim)" font-family="var(--font-body)">${esc(lbl)}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;overflow:visible;">
+    <line x1="${padL}" y1="${padT+innerH}" x2="${w-padR}" y2="${padT+innerH}" stroke="var(--line)" stroke-width="1"></line>
+    ${bars}
+  </svg>`;
+}
+
+function svgDonutChart(entries){
+  // entries: [{label, value}]
+  const w=140, h=140, cx=70, cy=70, r=52, stroke=20;
+  const total = entries.reduce((s,e)=>s+e.value,0);
+  if(!total) return `<p style="font-size:12.5px;color:var(--ink-dim);">Grafik için yeterli veri yok.</p>`;
+  const palette = ['var(--brand)','var(--gold)','var(--success)','var(--warning)','var(--danger)','var(--ink-dim)'];
+  let acc = 0;
+  const circumf = 2*Math.PI*r;
+  const segs = entries.map((e,i)=>{
+    const frac = e.value/total;
+    const dash = frac*circumf;
+    const gap = circumf-dash;
+    const offset = -acc*circumf;
+    acc += frac;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${palette[i%palette.length]}" stroke-width="${stroke}"
+      stroke-dasharray="${dash.toFixed(1)} ${gap.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"></circle>`;
+  }).join('');
+  const legend = entries.map((e,i)=>`
+    <div style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:5px;">
+      <span style="width:9px;height:9px;border-radius:2px;background:${palette[i%palette.length]};flex:none;"></span>
+      <span style="flex:1;color:var(--ink-dim);">${esc(e.label)}</span>
+      <span class="mono" style="font-weight:600;">${tl(e.value)}</span>
+    </div>`).join('');
+  return `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <svg viewBox="0 0 ${w} ${h}" style="width:130px;height:130px;flex:none;">${segs}</svg>
+    <div style="flex:1;min-width:140px;">${legend}</div>
+  </div>`;
+}
+
+function openGelirGiderReport(){
+  const d = computeGelirGider();
+  const site = isSiteTipi();
+  const isletmeAdi = currentIsletme()?.ad || '';
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Gelir-Gider Tablosu</h2>
+      ${reportBackClose()}
+    </div>
+    <div id="printArea">
+      <h3 style="margin-bottom:2px;">${esc(isletmeAdi)} — Gelir-Gider Tablosu</h3>
+      <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+      <div class="divider" style="margin:0 0 18px;"></div>
+
+      <div class="stat-grid" style="margin-bottom:18px;">
+        <div class="stat-card"><div class="label">Toplam Gelir</div><div class="value small">${tl(d.gelirToplam)}</div></div>
+        <div class="stat-card"><div class="label">Toplam Gider</div><div class="value small">${tl(d.giderGenelToplam)}</div></div>
+        <div class="stat-card"><div class="label">Net Durum</div><div class="value small" style="color:${d.net>=0?'var(--success)':'var(--danger)'};">${tl(d.net)}</div></div>
+        ${site ? `<div class="stat-card"><div class="label">Aidat / Demirbaş</div><div class="value small">${tl(d.aidatToplam)}</div><div class="sub">Demirbaş: ${tl(d.demirbasToplam)}</div></div>`
+               : `<div class="stat-card"><div class="label">Gelir Kayıtları</div><div class="value small">${tl(d.gelirlerToplam)}</div><div class="sub">${STATE.gelirler.length} kayıt</div></div>`}
+      </div>
+
+      <div class="section-title">Aylık Gelir Trendi</div>
+      ${svgBarChart(d.gelirTrend)}
+
+      ${site ? `
+      <div class="section-title">Aylık Aidat Tahsilatı</div>
+      <table class="plain"><thead><tr><th>Ay</th><th>Tahsilat</th></tr></thead><tbody>
+        ${d.aidatByMonth.map(r=>`<tr><td>${monthLabel(r.donem)}</td><td class="mono">${tl(r.tutar)}</td></tr>`).join('') || '<tr><td colspan="2">Kayıt yok</td></tr>'}
+      </tbody></table>` : `
+      <div class="section-title">Gelir Kayıtları</div>
+      <table class="plain"><thead><tr><th>Açıklama</th><th>Tutar</th></tr></thead><tbody>
+        ${STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').map(g=>`<tr><td>${esc(g.aciklama||'')}</td><td class="mono">${tl(g.tutar)}</td></tr>`).join('') || '<tr><td colspan="2">Kayıt yok</td></tr>'}
+      </tbody></table>`}
+
+      <div class="section-title">Gider Türüne Göre Dağılım</div>
+      ${svgDonutChart(Object.entries(d.giderByTur).map(([k,v])=>({label:k, value:v})).concat(d.personelOdemeToplam ? [{label:'Personel Maaşları', value:d.personelOdemeToplam}] : []))}
+      <table class="plain" style="margin-top:12px;"><thead><tr><th>Gider Türü</th><th>Tutar</th></tr></thead><tbody>
+        ${Object.entries(d.giderByTur).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="mono">${tl(v)}</td></tr>`).join('') || '<tr><td colspan="2">Kayıt yok</td></tr>'}
+        <tr><td><b>Personel Maaşları (ödenen)</b></td><td class="mono"><b>${tl(d.personelOdemeToplam)}</b></td></tr>
+      </tbody></table>
+      <p style="color:var(--ink-dim);font-size:11.5px;margin-top:14px;">Not: Gider kayıtlarında yıl bilgisi tutulmadığından, giderler tüm dönemler için toplanmıştır.</p>
+    </div>
+    <div class="no-print" style="display:flex;gap:9px;margin-top:18px;">
+      <button class="btn btn-primary btn-block" id="printBtn">${ICON.printer} Yazdır / PDF Kaydet</button>
+      <button class="btn btn-ghost btn-block" id="excelBtn">Excel'e Aktar</button>
+    </div>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('printBtn').onclick = ()=> window.print();
+  document.getElementById('excelBtn').onclick = ()=> exportGelirGiderExcel(d);
+}
+
+function exportGelirGiderExcel(d){
+  if(typeof XLSX==='undefined'){ showToast('Excel modülü yüklenemedi, internet bağlantınızı kontrol edin'); return; }
+  const site = isSiteTipi();
+  const isletmeAdi = currentIsletme()?.ad || 'İşletme';
+  const wb = XLSX.utils.book_new();
+  const ozet = [
+    [isletmeAdi+' — Gelir-Gider Tablosu'],
+    ['Oluşturulma tarihi', new Date().toLocaleDateString('tr-TR')],
+    [],
+    ['Toplam Gelir', d.gelirToplam],
+    ['Toplam Gider', d.giderGenelToplam],
+    ['Net Durum', d.net],
+    ...(site ? [['Aidat Toplam', d.aidatToplam], ['Demirbaş Toplam', d.demirbasToplam]] : [['Gelir Kayıtları Toplamı', d.gelirlerToplam]]),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ozet), 'Özet');
+
+  if(site){
+    const aylik = [['Ay','Tahsilat'], ...d.aidatByMonth.map(r=>[monthLabel(r.donem), r.tutar])];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aylik), 'Aylık Aidat');
+  } else {
+    const gelirSheet = [['Açıklama','Tutar','Tarih'], ...STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').map(g=>[g.aciklama||'', g.tutar, g.tarih||''])];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(gelirSheet), 'Gelirler');
+  }
+
+  const giderler = [['Gider Türü','Tutar'], ...Object.entries(d.giderByTur), ['Personel Maaşları (ödenen)', d.personelOdemeToplam]];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(giderler), 'Giderler');
+
+  XLSX.writeFile(wb, (isletmeAdi.replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g,'-'))+'-gelir-gider-'+todayISO()+'.xlsx');
+}
+
+/* ---------------------------- YILLIK KARŞILAŞTIRMA ---------------------------- */
+function computeYillikKarsilastirma(){
+  const site = isSiteTipi();
+  const now = new Date();
+  const thisYear = String(now.getFullYear());
+  const lastYear = String(now.getFullYear()-1);
+
+  const gelirByYear = {};
+  let gelirYilBilinmiyor = 0;
+  if(site){
+    STATE.payments.filter(p=>p.tur==='aidat' && p.tutar_odenen).forEach(p=>{
+      const y = p.donem ? p.donem.slice(0,4) : null;
+      if(!y) return;
+      gelirByYear[y] = (gelirByYear[y]||0) + (Number(p.tutar_odenen)||0);
+    });
+  } else {
+    STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').forEach(g=>{
+      if(!g.tarih){ gelirYilBilinmiyor += Number(g.tutar)||0; return; }
+      const y = g.tarih.slice(0,4);
+      gelirByYear[y] = (gelirByYear[y]||0) + (Number(g.tutar)||0);
+    });
+  }
+
+  const giderByYear = {};
+  let giderYilBilinmiyor = 0;
+  STATE.expenses.filter(e=>e.durum==='ÖDENDİ').forEach(e=>{
+    if(!e.tarih){ giderYilBilinmiyor += Number(e.tutar)||0; return; }
+    const y = e.tarih.slice(0,4);
+    giderByYear[y] = (giderByYear[y]||0) + (Number(e.tutar)||0);
+  });
+
+  const personelByYear = {};
+  STATE.staffPayments.filter(sp=>sp.durum==='ÖDENDİ').forEach(sp=>{
+    const y = sp.ay ? sp.ay.slice(0,4) : null;
+    if(!y) return;
+    const st = STATE.staff.find(x=>x.id===sp.staff_id);
+    personelByYear[y] = (personelByYear[y]||0) + (st ? Number(st.aylik_ucret)||0 : 0);
+  });
+
+  function rowFor(y){
+    const gelir = gelirByYear[y]||0;
+    const gider = (giderByYear[y]||0) + (personelByYear[y]||0);
+    return {year:y, gelir, gider, net: gelir-gider};
+  }
+  function pctChange(a,b){ if(!b) return a>0 ? null : 0; return ((a-b)/b)*100; }
+  const cur = rowFor(thisYear), prev = rowFor(lastYear);
+  return {thisYear, lastYear, cur, prev, giderYilBilinmiyor, gelirYilBilinmiyor,
+    gelirChange: pctChange(cur.gelir, prev.gelir),
+    giderChange: pctChange(cur.gider, prev.gider)};
+}
+
+function pctBadge(pct, goodDirection){
+  // goodDirection: 'up' (artış iyi, ör. gelir) veya 'down' (artış kötü, ör. gider)
+  if(pct===null) return `<span class="chip" style="background:var(--neutral-chip);color:var(--ink-dim);">yeni</span>`;
+  const up = pct>=0;
+  const iyi = goodDirection==='up' ? up : !up;
+  const color = iyi ? 'var(--success)' : 'var(--danger)';
+  return `<span class="mono" style="font-weight:700;color:${color};">${up?'+':''}${pct.toFixed(1)}%</span>`;
+}
+
+function openYillikKarsilastirmaReport(){
+  const d = computeYillikKarsilastirma();
+  const isletmeAdi = currentIsletme()?.ad || '';
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Yıllık Karşılaştırma</h2>
+      ${reportBackClose()}
+    </div>
+    <div id="printArea">
+      <h3 style="margin-bottom:2px;">${esc(isletmeAdi)} — Yıllık Karşılaştırma</h3>
+      <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+      <div class="divider" style="margin:0 0 18px;"></div>
+
+      <div class="section-title">${d.thisYear} — ${d.lastYear}</div>
+      ${svgBarChart([
+        {short:"'"+d.lastYear.slice(2)+' Gelir', tutar:d.prev.gelir, color:'var(--brand-2)'},
+        {short:"'"+d.thisYear.slice(2)+' Gelir', tutar:d.cur.gelir, color:'var(--brand)'},
+        {short:"'"+d.lastYear.slice(2)+' Gider', tutar:d.prev.gider, color:'var(--gold-line)'},
+        {short:"'"+d.thisYear.slice(2)+' Gider', tutar:d.cur.gider, color:'var(--gold)'},
+      ])}
+
+      <table class="plain" style="margin-top:8px;"><thead><tr><th>Kalem</th><th>${d.lastYear}</th><th>${d.thisYear}</th><th>Değişim</th></tr></thead><tbody>
+        <tr><td>Gelir</td><td class="mono">${tl(d.prev.gelir)}</td><td class="mono">${tl(d.cur.gelir)}</td><td style="text-align:right;">${pctBadge(d.gelirChange,'up')}</td></tr>
+        <tr><td>Gider</td><td class="mono">${tl(d.prev.gider)}</td><td class="mono">${tl(d.cur.gider)}</td><td style="text-align:right;">${pctBadge(d.giderChange,'down')}</td></tr>
+        <tr><td><b>Net</b></td><td class="mono"><b>${tl(d.prev.net)}</b></td><td class="mono"><b>${tl(d.cur.net)}</b></td><td></td></tr>
+      </tbody></table>
+
+      ${d.giderYilBilinmiyor ? `<p style="color:var(--ink-dim);font-size:11.5px;margin-top:14px;">Not: Tarihi girilmemiş ${tl(d.giderYilBilinmiyor)} tutarında gider bu karşılaştırmaya dahil edilmedi.</p>` : ''}
+      ${d.gelirYilBilinmiyor ? `<p style="color:var(--ink-dim);font-size:11.5px;margin-top:4px;">Not: Tarihi girilmemiş ${tl(d.gelirYilBilinmiyor)} tutarında gelir bu karşılaştırmaya dahil edilmedi.</p>` : ''}
+    </div>
+    <button class="btn btn-primary btn-block no-print" id="printBtn" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('printBtn').onclick = ()=> window.print();
+}
+
+/* ---------------------------- CARİ HESAP EKSTRESİ ---------------------------- */
+function openCariEkstreSheet(){
+  const firmalar = [...new Set(STATE.expenses.map(e=>e.firma).filter(Boolean))].sort();
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Cari Hesap Ekstresi</h2>
+      ${reportBackClose()}
+    </div>
+    <div class="field"><label>Firma seçin</label>
+      <select id="ekstre_firma">
+        <option value="">— Firma seçin —</option>
+        ${firmalar.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="ekstre_result"></div>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('ekstre_firma').onchange = (e)=>{
+    const firma = e.target.value;
+    const result = document.getElementById('ekstre_result');
+    if(!firma){ result.innerHTML=''; return; }
+    const rows = STATE.expenses.filter(x=>x.firma===firma).sort((a,b)=>(a.tarih||'').localeCompare(b.tarih||''));
+    const toplam = rows.filter(r=>r.durum==='ÖDENDİ').reduce((s,r)=>s+(Number(r.tutar)||0),0);
+    const bekleyen = rows.filter(r=>r.durum!=='ÖDENDİ').reduce((s,r)=>s+(Number(r.tutar)||0),0);
+    result.innerHTML = `
+      <div id="printArea">
+        <h3 style="margin-bottom:2px;">${esc(currentIsletme()?.ad||'')} — Cari Hesap Ekstresi</h3>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">${esc(firma)} — Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+        <div class="divider" style="margin:0 0 18px;"></div>
+        <div class="stat-grid" style="margin-bottom:16px;">
+          <div class="stat-card"><div class="label">Ödenen Toplam</div><div class="value small">${tl(toplam)}</div></div>
+          <div class="stat-card"><div class="label">Bekleyen</div><div class="value small">${tl(bekleyen)}</div></div>
+        </div>
+        <table class="plain"><thead><tr><th>Tarih</th><th>Gider Türü</th><th>Durum</th><th>Tutar</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr><td>${r.tarih||'—'}</td><td>${esc(r.gider_turu||'')}</td><td>${esc(r.durum||'')}</td><td class="mono">${tl(r.tutar)}</td></tr>`).join('') || '<tr><td colspan="4">Kayıt yok</td></tr>'}
+        </tbody></table>
+      </div>
+      <button class="btn btn-primary btn-block no-print" id="ekstre_print" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+    `;
+    document.getElementById('ekstre_print').onclick = ()=> window.print();
+  };
+}
+
+function openIsletmeProjesiSheet(){
+  const staffToplam = STATE.staff.reduce((s,p)=>s+(Number(p.aylik_ucret)||0),0);
+  const alanToplam = STATE.apartments.reduce((s,a)=>s+(Number(a.toplam_brut_alan)||0),0);
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">İşletme Projesi Hesaplayıcı</h2>
+      ${reportBackClose()}
+    </div>
+    <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">Kat Mülkiyeti Kanunu'na göre; personel gibi ortak hizmet giderleri dairelere eşit, diğer giderler ise dairenin alanı oranında dağıtılır. Tutarları girip hesaplayın.</p>
+
+    <div class="field"><label>Aylık Personel Gideri (eşit dağıtılır)</label><input type="number" inputmode="decimal" id="ip_personel" value="${staffToplam||''}" /></div>
+    <div class="field"><label>Aylık Diğer Sabit Giderler (elektrik, su, asansör bakımı, sigorta vb. — alan oranında dağıtılır)</label><input type="number" inputmode="decimal" id="ip_diger" placeholder="0" /></div>
+    <div class="field" style="margin-bottom:6px;"><label>Yedek Akçe Oranı (%)</label><input type="number" inputmode="decimal" id="ip_yedek" value="10" /></div>
+    <p style="color:var(--ink-dim);font-size:11px;margin:0 0 14px;">Not: Yedek akçe genellikle yıllık gider toplamının %10'unu aşmayacak şekilde belirlenir. Kesin oran için mali müşavirinize danışın.</p>
+    <button class="btn btn-gold btn-block" id="ip_hesapla">Hesapla</button>
+    <div id="ip_result"></div>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('ip_hesapla').onclick = ()=>{
+    const personel = Number(document.getElementById('ip_personel').value)||0;
+    const diger = Number(document.getElementById('ip_diger').value)||0;
+    const yedekOran = Number(document.getElementById('ip_yedek').value)||0;
+    const araToplam = personel + diger;
+    const yedek = araToplam * (yedekOran/100);
+    const genelToplam = araToplam + yedek;
+    const esitPay = STATE.apartments.length ? personel/STATE.apartments.length : 0;
+
+    const rows = STATE.apartments.map(a=>{
+      const alanOrani = alanToplam ? (Number(a.toplam_brut_alan)||0)/alanToplam : 0;
+      const oranliPay = (diger+yedek) * alanOrani;
+      return {no:a.no, malik:a.malik, toplam: esitPay + oranliPay};
+    });
+    const toplamAidat = rows.reduce((s,r)=>s+r.toplam,0);
+
+    document.getElementById('ip_result').innerHTML = `
+      <div id="printArea">
+        <div class="divider"></div>
+        <h3 style="margin-bottom:2px;">${esc(currentIsletme()?.ad||'')} — İşletme Projesi</h3>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 16px;">Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+        <div class="stat-grid" style="margin-bottom:16px;">
+          <div class="stat-card"><div class="label">Aylık Toplam Gider</div><div class="value small">${tl(genelToplam)}</div></div>
+          <div class="stat-card"><div class="label">Yedek Akçe</div><div class="value small">${tl(yedek)}</div></div>
+        </div>
+        <div class="section-title">Daire Bazında Aylık Aidat</div>
+        <table class="plain"><thead><tr><th>Daire</th><th>Malik</th><th>Aidat</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr><td>${r.no}</td><td>${esc(r.malik||'')}</td><td class="mono">${tl(r.toplam)}</td></tr>`).join('')}
+          <tr><td colspan="2"><b>Toplam</b></td><td class="mono"><b>${tl(toplamAidat)}</b></td></tr>
+        </tbody></table>
+      </div>
+      <button class="btn btn-primary btn-block no-print" id="ip_print" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+    `;
+    document.getElementById('ip_print').onclick = ()=> window.print();
+  };
+}
+
+function openGenelKurulReport(){
+  const d = computeGelirGider();
+  const unpaid = STATE.currentMonth ? STATE.apartments.filter(a=>{
+    const p = paymentFor(a.no,'aidat',STATE.currentMonth);
+    return !p || p.durum!=='ÖDENDİ';
+  }) : [];
+  const notlar = STATE.settings.genel_kurul_notu || '';
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Genel Kurul Özet Raporu</h2>
+      ${reportBackClose()}
+    </div>
+    <div id="printArea">
+      <h3 style="margin-bottom:2px;">${esc(currentIsletme()?.ad||'')} — Genel Kurul Özet Raporu</h3>
+      <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+      <div class="divider" style="margin:0 0 18px;"></div>
+
+      <div class="stat-grid" style="margin-bottom:16px;">
+        <div class="stat-card"><div class="label">Toplam Gelir</div><div class="value small">${tl(d.gelirToplam)}</div></div>
+        <div class="stat-card"><div class="label">Toplam Gider</div><div class="value small">${tl(d.giderGenelToplam)}</div></div>
+        <div class="stat-card"><div class="label">Net Durum</div><div class="value small">${tl(d.net)}</div></div>
+        <div class="stat-card"><div class="label">Personel Sayısı</div><div class="value small">${STATE.staff.length}</div></div>
+      </div>
+
+      <div class="section-title">${STATE.currentMonth?monthLabel(STATE.currentMonth):'Bu ay'} İtibarıyla Ödemeyen Daireler (${unpaid.length})</div>
+      ${unpaid.length ? `<table class="plain"><thead><tr><th>Daire</th><th>Malik</th></tr></thead><tbody>
+        ${unpaid.map(a=>`<tr><td>${a.no}</td><td>${esc(a.malik||'')}</td></tr>`).join('')}
+      </tbody></table>` : '<p style="font-size:13px;color:var(--ink-dim);">Tüm daireler güncel.</p>'}
+
+      <div class="section-title">Personel Özeti</div>
+      <table class="plain"><thead><tr><th>İsim</th><th>Görev</th><th>Aylık Ücret</th></tr></thead><tbody>
+        ${STATE.staff.map(p=>`<tr><td>${esc(p.isim||'—')}</td><td>${esc(p.gorev)}</td><td class="mono">${tl(p.aylik_ucret)}</td></tr>`).join('') || '<tr><td colspan="3">Kayıt yok</td></tr>'}
+      </tbody></table>
+
+      <div class="section-title">Notlar</div>
+      <p id="notlarPrint" style="white-space:pre-wrap;font-size:13.5px;">${esc(notlar)||'—'}</p>
+    </div>
+
+    <div class="field no-print" style="margin-top:16px;">
+      <label>Genel kurulda paylaşmak istediğiniz ek notlar</label>
+      <textarea id="gk_notlar" placeholder="örn. asansör bakımı için teklif alındı...">${esc(notlar)}</textarea>
+    </div>
+    <button class="btn btn-ghost btn-block no-print" id="gk_save_note" style="margin-bottom:10px;">Notu Kaydet</button>
+    <button class="btn btn-primary btn-block no-print" id="gk_print">${ICON.printer} Yazdır / PDF Kaydet</button>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('gk_save_note').onclick = async ()=>{
+    const v = document.getElementById('gk_notlar').value;
+    await saveSetting('genel_kurul_notu', v);
+    document.getElementById('notlarPrint').textContent = v || '—';
+    showToast('Not kaydedildi');
+  };
+  document.getElementById('gk_print').onclick = ()=> window.print();
+}
+
+const YASAL_ITEMS = [
+  {key:'karar_defteri', title:'Karar Defteri', desc:"Kat malikleri kurulunun aldığı tüm kararların yazıldığı, noter onaylı ve sayfaları numaralı defter. Her yıl sonunda (31 Aralık'a kadar) noterde kapanış tasdiki yaptırılmalı."},
+  {key:'gelir_gider_defteri', title:'Gelir-Gider Defteri', desc:'Tüm aidat tahsilatları ve giderlerin işlendiği, noter onaylı defter. Fatura ve makbuzların saklanması gerekir.'},
+  {key:'isletme_projesi', title:'İşletme Projesi', desc:"Yıllık tahmini gelir-gider ve her dairenin payını gösteren, kat maliklerine tebliğ edilmesi gereken belge (Kat Mülkiyeti Kanunu md. 37). Bu bölümdeki hesaplayıcıyı kullanarak oluşturabilirsiniz."},
+  {key:'genel_kurul_tutanagi', title:'Genel Kurul Toplantı Tutanağı', desc:'Yıllık olağan toplantıda alınan kararların, katılımcı imzalarıyla birlikte karar defterine işlenmiş hali.'},
+];
+
+function openYasalBelgelerSheet(){
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Yasal Belgeler</h2>
+      ${reportBackClose()}
+    </div>
+    <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">Kat Mülkiyeti Kanunu'na göre bir site/apartman yönetiminin tutması gereken temel belgeler aşağıdadır. Elinizde olanları işaretleyin.</p>
+    <div class="row-list">
+      ${YASAL_ITEMS.map(it=>{
+        const checked = !!STATE.settings['yasal_'+it.key];
+        return `
+        <div class="card" style="padding:14px;">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <button type="button" class="yasal-check ${checked?'checked':''}" data-key="${it.key}">${checked?ICON.checkCircle:''}</button>
+            <div>
+              <b style="font-size:14px;">${it.title}</b>
+              <p style="margin:4px 0 0;font-size:12.5px;color:var(--ink-dim);line-height:1.5;">${it.desc}</p>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <p style="color:var(--ink-dim);font-size:11px;margin-top:16px;line-height:1.5;">Bu bilgiler genel bilgilendirme amaçlıdır, hukuki tavsiye niteliği taşımaz. Kesin ve güncel yükümlülükleriniz için bir mali müşavir veya avukata danışmanızı öneririz.</p>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.querySelectorAll('.yasal-check').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const key = 'yasal_'+btn.dataset.key;
+      const newVal = !STATE.settings[key];
+      await saveSetting(key, newVal);
+      openYasalBelgelerSheet();
+    };
+  });
+}
+
+/* ---------------------------- PWA (yüklenebilir uygulama) ---------------------------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  });
+}
+
+/* ---------------------------- START ---------------------------- */
+boot();
+</script>
+</body>
+</html>
