@@ -257,10 +257,16 @@ app.post('/api/gelirler', requireAuth, async (req, res) => {
 app.put('/api/gelirler/:id', requireAuth, async (req, res) => {
   try {
     const { aciklama, tutar, tarih, durum, not_metni, proje_id } = req.body || {};
+    // Bir kontrattan otomatik oluşan gelirin tutarı burada elle değiştirilirse
+    // (ör. sözleşme tutarından farklı net bir tutar girildiyse), tutar_manuel
+    // işaretlenir ki kontrat bir sonraki güncellemesinde bu tutarı geri ezmesin.
+    const { rows: existingRows } = await q('select kontrat_id from gelirler where id = $1', [req.params.id]);
+    const kontratGeliriMi = !!(existingRows[0] && existingRows[0].kontrat_id);
     const { rows } = await q(
-      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, not_metni = $6, proje_id = $7
+      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, not_metni = $6, proje_id = $7,
+         tutar_manuel = case when $8::boolean then true else tutar_manuel end
        where id = $1 returning *`,
-      [req.params.id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null]
+      [req.params.id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null, kontratGeliriMi]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -283,13 +289,18 @@ app.delete('/api/gelirler/:id', requireAuth, async (req, res) => {
 // Kontratlar (ofis/inşaat gibi 'genel' tipi işletmelerde — satılık/kiralık kontrat takibi)
 // ------------------------------------------------------------------
 const CONTRACT_RETURNING = `id, isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni,
-  belge_ad, belge_tip, (belge_data is not null) as has_belge, proje_id, created_at`;
+  belge_ad, belge_tip, (belge_data is not null) as has_belge, proje_id, gelir_olustur, created_at`;
 
 // Gayrimenkulde bir kontrat imzalandığı an gelir de sayılır: her kontrat için
 // otomatik, ona bağlı (kontrat_id ile) bir Gelir kaydı tutulur ve kontrat her
 // güncellendiğinde/silindiğinde bu gelir kaydı da senkron kalır.
 // "gelecek" (henüz kesinleşmemiş) kontratların geliri "ÖDENMEDİ" (beklemede) sayılır,
 // "aktif"/"tamamlandi" olanlarınki "ÖDENDİ" sayılır.
+// gelir_olustur=false ise (ör. geçmişe ait, geliri zaten elle girilmiş bir kontrat)
+// hiç otomatik gelir kaydı oluşturulmaz/varsa silinir.
+// tutar_manuel=true olan bir gelir kaydının tutarı (ortak payı/indirim yüzünden
+// net alınan tutar sözleşme tutarından farklıysa elle değiştirilmiş demektir)
+// kontrat güncellemesinde bir daha ezilmez.
 function kontratGelirDurum(kontratDurum) {
   return kontratDurum === 'gelecek' ? 'ÖDENMEDİ' : 'ÖDENDİ';
 }
@@ -300,14 +311,19 @@ function kontratGelirAciklama(c) {
 }
 async function syncContractGelir(contract) {
   if (!contract) return;
+  const { rows: existing } = await q('select id from gelirler where kontrat_id = $1', [contract.id]);
+  if (contract.gelir_olustur === false) {
+    if (existing.length) await q('delete from gelirler where kontrat_id = $1', [contract.id]);
+    return;
+  }
   const durum = kontratGelirDurum(contract.durum);
   const aciklama = kontratGelirAciklama(contract);
   const tarih = contract.baslangic_tarihi || new Date().toISOString().slice(0, 10);
   const notMetni = 'Bu gelir, ilgili kontrattan otomatik oluşturuldu/güncellendi. Değiştirmek için Kontratlar sekmesinden kontratı düzenleyin.';
-  const { rows } = await q('select id from gelirler where kontrat_id = $1', [contract.id]);
-  if (rows.length) {
+  if (existing.length) {
     await q(
-      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, proje_id = $6, not_metni = $7 where kontrat_id = $1`,
+      `update gelirler set aciklama = $2, tutar = case when tutar_manuel then tutar else $3 end,
+         tarih = $4, durum = $5, proje_id = $6, not_metni = $7 where kontrat_id = $1`,
       [contract.id, aciklama, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni]
     );
   } else {
@@ -321,11 +337,11 @@ async function syncContractGelir(contract) {
 
 app.post('/api/contracts', requireAuth, async (req, res) => {
   try {
-    const { isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, proje_id } = req.body || {};
+    const { isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, proje_id, gelir_olustur } = req.body || {};
     if (!isletme_id) return res.status(400).json({ error: 'isletme_id gerekli' });
     const { rows } = await q(
-      `insert into contracts (isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, proje_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      `insert into contracts (isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, proje_id, gelir_olustur)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        returning ${CONTRACT_RETURNING}`,
       [
         isletme_id,
@@ -341,6 +357,7 @@ app.post('/api/contracts', requireAuth, async (req, res) => {
         belge_tip ?? null,
         belge_data ?? null,
         proje_id ?? null,
+        gelir_olustur === false ? false : true,
       ]
     );
     await syncContractGelir(rows[0]);
@@ -353,7 +370,7 @@ app.post('/api/contracts', requireAuth, async (req, res) => {
 
 app.put('/api/contracts/:id', requireAuth, async (req, res) => {
   try {
-    const { mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, remove_belge, proje_id } = req.body || {};
+    const { mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni, belge_ad, belge_tip, belge_data, remove_belge, proje_id, gelir_olustur } = req.body || {};
     const { rows } = await q(
       `update contracts set
          mulk_adi = $2,
@@ -367,7 +384,8 @@ app.put('/api/contracts/:id', requireAuth, async (req, res) => {
          belge_ad = case when $10::boolean then null when $11::text is not null then $11 else belge_ad end,
          belge_tip = case when $10::boolean then null when $12::text is not null then $12 else belge_tip end,
          belge_data = case when $10::boolean then null when $13::text is not null then $13 else belge_data end,
-         proje_id = $14
+         proje_id = $14,
+         gelir_olustur = $15
        where id = $1
        returning ${CONTRACT_RETURNING}`,
       [
@@ -385,6 +403,7 @@ app.put('/api/contracts/:id', requireAuth, async (req, res) => {
         belge_tip ?? null,
         belge_data ?? null,
         proje_id ?? null,
+        gelir_olustur === false ? false : true,
       ]
     );
     await syncContractGelir(rows[0]);
