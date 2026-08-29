@@ -1391,16 +1391,16 @@ function renderGelir(){
 
 function openGelirSheet(id, presetProjeId){
   const g = id ? STATE.gelirler.find(x=>x.id===id) : null;
-  const kilitli = !!g?.kontrat_id; // Kontrattan otomatik oluşan gelirler burada değil, Kontratlar'dan düzenlenir.
+  const kilitli = !!g?.kontrat_id; // Kontrattan otomatik oluşan gelirler: açıklama/tarih/durum Kontratlar'dan düzenlenir, ama net tutar burada elle değiştirilebilir (ortak payı/indirim yüzünden).
   const html = `
     <div class="sheet-head">
       <h2>${g?'Geliri Düzenle':'Yeni Gelir'}</h2>
       <button class="close" data-close-sheet>${ICON.x}</button>
     </div>
-    ${kilitli ? `<p style="font-size:11.5px;color:var(--ink-dim);margin:-8px 0 14px;line-height:1.5;background:var(--surface-2);padding:10px 12px;border-radius:9px;">Bu gelir bir kontrattan otomatik oluşturuldu. Tutarını veya durumunu değiştirmek için Kontratlar sekmesinden ilgili kontratı düzenle.</p>` : ''}
+    ${kilitli ? `<p style="font-size:11.5px;color:var(--ink-dim);margin:-8px 0 14px;line-height:1.5;background:var(--surface-2);padding:10px 12px;border-radius:9px;">Bu gelir bir kontrattan otomatik oluşturuldu. Açıklama/tarih/durumunu değiştirmek için Kontratlar sekmesinden ilgili kontratı düzenle. Ortak payı veya indirim yüzünden eline geçen net tutar sözleşmedekinden farklıysa, aşağıdaki tutarı değiştirebilirsin.</p>` : ''}
     <div class="field"><label>Açıklama</label><input id="g_aciklama" value="${esc(g?.aciklama||'')}" placeholder="örn. Ortak ödemesi, 3 nolu daire satışı, ofis kirası..." ${kilitli?'disabled':''} /></div>
     ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="g_proje" ${kilitli?'disabled':''}>${projeSelectHtml(g?g.proje_id:presetProjeId)}</select></div>` : ''}
-    <div class="field"><label>Tutar (₺)</label><input id="g_tutar" type="text" inputmode="decimal" value="${g?.tutar??''}" ${kilitli?'disabled':''} /></div>
+    <div class="field"><label>${kilitli?'Net Alınan Tutar (₺)':'Tutar (₺)'}</label><input id="g_tutar" type="text" inputmode="decimal" value="${g?.tutar??''}" /></div>
     <div class="field"><label>Tarih</label><input id="g_tarih" type="date" value="${g?.tarih||''}" ${kilitli?'disabled':''} /></div>
     <div class="field"><label>Durum</label>
       <div class="seg" data-role="gelirDurumSeg">
@@ -1409,17 +1409,16 @@ function openGelirSheet(id, presetProjeId){
       </div>
     </div>
     <div class="field"><label>Not</label><textarea id="g_not" ${kilitli?'disabled':''}>${esc(g?.not_metni||'')}</textarea></div>
-    ${!kilitli ? `
     <div style="display:flex;gap:9px;">
-      ${g?`<button class="btn btn-danger" id="delGelirBtn">${ICON.trash}</button>`:''}
+      ${(g && !kilitli)?`<button class="btn btn-danger" id="delGelirBtn">${ICON.trash}</button>`:''}
       <button class="btn btn-primary btn-block" id="saveGelirBtn">Kaydet</button>
-    </div>` : ''}
+    </div>
   `;
   openSheet(html);
-  if(kilitli) return;
   let durum = g?.durum || 'ÖDENMEDİ';
   document.querySelectorAll('[data-d]').forEach(b=>{
     b.onclick = ()=>{
+      if(kilitli) return;
       document.querySelectorAll('[data-d]').forEach(x=>x.className='');
       durum = b.dataset.d;
       b.className = 'on ' + (durum==='ÖDENDİ'?'odendi':'odenmedi');
@@ -1492,7 +1491,7 @@ function renderKontratlar(){
           <tbody>
             ${STATE.contracts.map(k=>`
               <tr data-open-kontrat="${k.id}">
-                <td class="name-cell">${esc(k.mulk_adi||'—')}</td>
+                <td class="name-cell">${esc(k.mulk_adi||'—')}${k.gelir_olustur===false?` <span class="chip" style="background:var(--surface-2);color:var(--ink-dim);">Gelirsiz</span>`:''}</td>
                 ${STATE.projeler.length?`<td>${projeChip(k.proje_id)}</td>`:''}
                 <td>${kontratTipLabel(k.tip)}</td>
                 <td>${esc(k.karsi_taraf||'—')}</td>
@@ -1547,7 +1546,11 @@ function openContractSheet(id, presetProjeId){
       </div>
     </div>
     <div class="field"><label>Not</label><textarea id="k_not">${esc(k?.not_metni||'')}</textarea></div>
-    <p style="font-size:11px;color:var(--ink-dim);margin:-8px 0 14px;line-height:1.5;">Bu kontratı kaydettiğinde, aynı tutarda Gelir tarafında da otomatik bir kayıt oluşur (veya güncellenir). Kontratı silersen, o gelir kaydı da otomatik silinir.</p>
+    <p style="font-size:11px;color:var(--ink-dim);margin:-8px 0 10px;line-height:1.5;">Bu kontratı kaydettiğinde, aynı tutarda Gelir tarafında da otomatik bir kayıt oluşur (veya güncellenir). Kontratı silersen, o gelir kaydı da otomatik silinir.</p>
+    <label style="display:flex;align-items:flex-start;gap:9px;margin:0 0 16px;cursor:pointer;font-size:12.5px;color:var(--ink-dim);line-height:1.4;">
+      <input type="checkbox" id="k_gelir_olustur" ${(!k || k?.gelir_olustur!==false) ? 'checked' : ''} style="margin-top:2px;flex:none;width:16px;height:16px;" />
+      <span>Bu kontrat geçmişe ait, geliri zaten Gelir sayfasına elle girdim — <b>otomatik gelir kaydı oluşturma</b>.</span>
+    </label>
     <div class="field">
       <label>Belge (sözleşme, PDF veya fotoğraf)</label>
       ${k?.has_belge ? `
@@ -1608,6 +1611,7 @@ function openContractSheet(id, presetProjeId){
       not_metni: document.getElementById('k_not').value || null,
       remove_belge: removeBelge,
       proje_id: projeSel && projeSel.value ? Number(projeSel.value) : null,
+      gelir_olustur: document.getElementById('k_gelir_olustur').checked,
     };
     const saveBtnEl = document.getElementById('saveKontratBtn');
     saveBtnEl.disabled = true; saveBtnEl.textContent = 'Kaydediliyor...';
