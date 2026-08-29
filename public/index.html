@@ -1516,6 +1516,7 @@ function renderKontratlar(){
   const aktifSayisi = STATE.contracts.filter(k=>k.durum==='aktif').length;
   const gelirTutar = STATE.contracts.filter(k=>kontratYonlu(k.tip)==='gelir').reduce((s,k)=>s+(Number(k.tutar)||0),0);
   const giderTutar = STATE.contracts.filter(k=>kontratYonlu(k.tip)==='gider').reduce((s,k)=>s+(Number(k.tutar)||0),0);
+  const toplamTutar = STATE.contracts.reduce((s,k)=>s+(Number(k.tutar)||0),0);
   return `
     <div class="kpis">
       <div class="kpi"><div class="lbl">Toplam Kontrat</div><div class="val">${STATE.contracts.length}</div></div>
