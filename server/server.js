@@ -123,16 +123,11 @@ app.get('/api/data', requireAuth, async (req, res) => {
     const [a, p, e, s, mi, g, c, pr] = await Promise.all([
       q('select * from apartments where isletme_id = $1 order by no', [isletmeId]),
       q('select * from payments where isletme_id = $1', [isletmeId]),
-      q('select * from expenses where isletme_id = $1 order by id desc', [isletmeId]),
-      q('select * from staff where isletme_id = $1 order by id', [isletmeId]),
+      q(`select ${EXPENSE_RETURNING} from expenses where isletme_id = $1 order by id desc`, [isletmeId]),
+      q(`select ${STAFF_RETURNING} from staff where isletme_id = $1 order by id`, [isletmeId]),
       q('select * from maintenance_items where isletme_id = $1 order by id', [isletmeId]),
       q('select * from gelirler where isletme_id = $1 order by id desc', [isletmeId]),
-      q(
-        `select id, isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni,
-                belge_ad, belge_tip, (belge_data is not null) as has_belge, proje_id, created_at
-         from contracts where isletme_id = $1 order by id desc`,
-        [isletmeId]
-      ),
+      q(`select ${CONTRACT_RETURNING} from contracts where isletme_id = $1 order by id desc`, [isletmeId]),
       q('select * from projeler where isletme_id = $1 order by id desc', [isletmeId]),
     ]);
     // staff_payments'in kendi isletme_id'si yok (staff_id üzerinden bağlı) — bu işletmenin
@@ -143,6 +138,13 @@ app.get('/api/data', requireAuth, async (req, res) => {
       const { rows } = await q('select * from staff_payments where staff_id = any($1::bigint[])', [staffIds]);
       staffPayments = rows;
     }
+    // kontrat_taksitler'in de kendi isletme_id'si yok (kontrat_id üzerinden bağlı).
+    const contractIds = c.rows.map((row) => row.id);
+    let contractInstallments = [];
+    if (contractIds.length) {
+      const { rows } = await q('select * from kontrat_taksitler where kontrat_id = any($1::bigint[]) order by taksit_no, id', [contractIds]);
+      contractInstallments = rows;
+    }
     res.json({
       apartments: a.rows,
       payments: p.rows,
@@ -152,6 +154,7 @@ app.get('/api/data', requireAuth, async (req, res) => {
       maintenanceItems: mi.rows,
       gelirler: g.rows,
       contracts: c.rows,
+      contractInstallments,
       projeler: pr.rows,
     });
   } catch (err) {
@@ -241,11 +244,11 @@ app.post('/api/months', requireAuth, async (req, res) => {
 // ------------------------------------------------------------------
 app.post('/api/gelirler', requireAuth, async (req, res) => {
   try {
-    const { isletme_id, aciklama, tutar, tarih, durum, not_metni, proje_id } = req.body || {};
+    const { isletme_id, aciklama, tutar, tarih, durum, not_metni, proje_id, taraf, odeme_sekli, fatura_no, kdv_orani, kdv_tutari } = req.body || {};
     const { rows } = await q(
-      `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, not_metni, proje_id)
-       values ($1, $2, $3, $4, $5, $6, $7) returning *`,
-      [isletme_id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null]
+      `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, not_metni, proje_id, taraf, odeme_sekli, fatura_no, kdv_orani, kdv_tutari)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning *`,
+      [isletme_id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null, taraf ?? null, odeme_sekli ?? null, fatura_no ?? null, kdv_orani ?? null, kdv_tutari ?? null]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -256,17 +259,18 @@ app.post('/api/gelirler', requireAuth, async (req, res) => {
 
 app.put('/api/gelirler/:id', requireAuth, async (req, res) => {
   try {
-    const { aciklama, tutar, tarih, durum, not_metni, proje_id } = req.body || {};
+    const { aciklama, tutar, tarih, durum, not_metni, proje_id, taraf, odeme_sekli, fatura_no, kdv_orani, kdv_tutari } = req.body || {};
     // Bir kontrattan otomatik oluşan gelirin tutarı burada elle değiştirilirse
     // (ör. sözleşme tutarından farklı net bir tutar girildiyse), tutar_manuel
     // işaretlenir ki kontrat bir sonraki güncellemesinde bu tutarı geri ezmesin.
     const { rows: existingRows } = await q('select kontrat_id from gelirler where id = $1', [req.params.id]);
     const kontratGeliriMi = !!(existingRows[0] && existingRows[0].kontrat_id);
     const { rows } = await q(
-      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, not_metni = $6, proje_id = $7,
+      `update gelirler set aciklama = $2, tutar = $3, tarih = $4, durum = $5, not_metni = $6, proje_id = $7, taraf = $9,
+         odeme_sekli = $10, fatura_no = $11, kdv_orani = $12, kdv_tutari = $13,
          tutar_manuel = case when $8::boolean then true else tutar_manuel end
        where id = $1 returning *`,
-      [req.params.id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null, kontratGeliriMi]
+      [req.params.id, aciklama ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, proje_id ?? null, kontratGeliriMi, taraf ?? null, odeme_sekli ?? null, fatura_no ?? null, kdv_orani ?? null, kdv_tutari ?? null]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -291,47 +295,141 @@ app.delete('/api/gelirler/:id', requireAuth, async (req, res) => {
 const CONTRACT_RETURNING = `id, isletme_id, mulk_adi, tip, karsi_taraf, tutar, baslangic_tarihi, bitis_tarihi, durum, not_metni,
   belge_ad, belge_tip, (belge_data is not null) as has_belge, proje_id, gelir_olustur, created_at`;
 
-// Gayrimenkulde bir kontrat imzalandığı an gelir de sayılır: her kontrat için
-// otomatik, ona bağlı (kontrat_id ile) bir Gelir kaydı tutulur ve kontrat her
-// güncellendiğinde/silindiğinde bu gelir kaydı da senkron kalır.
-// "gelecek" (henüz kesinleşmemiş) kontratların geliri "ÖDENMEDİ" (beklemede) sayılır,
+// Gider listesinde her satırın belge_data'sı (base64) yer kaplamasın diye burada da
+// has_belge boolean'ı ile döndürüyoruz — ham içerik ayrı bir uç noktadan (/api/expenses/:id/belge) gelir.
+const EXPENSE_RETURNING = `id, isletme_id, ay, gider_turu, firma, taraf, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori,
+  kontrat_id, taksit_id, tutar_manuel, kdv_tevkifat_tutar, odeme_sekli, fatura_no, kdv_orani, kdv_tutari, belge_ad, belge_tip, (belge_data is not null) as has_belge`;
+
+// Personel: inşaat işçileri için SGK belgesi (hizmet dökümü, tahakkuk fişi vb.) ve hangi
+// projede çalıştığı eklenebilir. Liste sorgusunda belge_data (base64) yer kaplamasın diye
+// has_belge boolean'ı döner, ham içerik /api/staff/:id/belge uç noktasından gelir.
+const STAFF_RETURNING = `id, isletme_id, isim, gorev, aylik_ucret, proje_id,
+  belge_ad, belge_tip, (belge_data is not null) as has_belge`;
+
+// Bir kontrat imzalandığı an, yönüne göre ya Gelir ya da Gider tarafında sayılır:
+// Satılık/Kiralık/Malik Anlaşması → para İÇERİ girer, otomatik bir Gelir kaydı tutulur.
+// Taşeron → para DIŞARI çıkar, otomatik bir Gider kaydı tutulur.
+// Kontrat her güncellendiğinde/silindiğinde bu kayıt da senkron kalır.
+// "gelecek" (henüz kesinleşmemiş) kontratların kaydı "ÖDENMEDİ" (beklemede) sayılır,
 // "aktif"/"tamamlandi" olanlarınki "ÖDENDİ" sayılır.
-// gelir_olustur=false ise (ör. geçmişe ait, geliri zaten elle girilmiş bir kontrat)
-// hiç otomatik gelir kaydı oluşturulmaz/varsa silinir.
-// tutar_manuel=true olan bir gelir kaydının tutarı (ortak payı/indirim yüzünden
-// net alınan tutar sözleşme tutarından farklıysa elle değiştirilmiş demektir)
-// kontrat güncellemesinde bir daha ezilmez.
+// gelir_olustur=false ise (ör. geçmişe ait, tutarı zaten elle girilmiş bir kontrat)
+// hiç otomatik kayıt oluşturulmaz/varsa silinir.
+// tutar_manuel=true olan bir kaydın tutarı (ortak payı/indirim yüzünden net tutar
+// sözleşmedekinden farklıysa elle değiştirilmiş demektir) kontrat güncellemesinde ezilmez.
+const KONTRAT_GELIR_TIPLERI = ['satilik', 'kiralik', 'malik'];
+const KONTRAT_TIP_LABELS = { satilik: 'Satılık', kiralik: 'Kiralık', malik: 'Malik Anlaşması', taseron: 'Taşeron' };
 function kontratGelirDurum(kontratDurum) {
   return kontratDurum === 'gelecek' ? 'ÖDENMEDİ' : 'ÖDENDİ';
 }
-function kontratGelirAciklama(c) {
-  const tipLabel = c.tip === 'kiralik' ? 'Kiralık' : 'Satılık';
+function kontratFinansAciklama(c) {
+  const tipLabel = KONTRAT_TIP_LABELS[c.tip] || 'Satılık';
   const parca = [c.mulk_adi, c.karsi_taraf].filter(Boolean).join(' - ');
-  return `Kontrat geliri: ${parca || 'Mülk'} (${tipLabel})`;
+  const yon = KONTRAT_GELIR_TIPLERI.includes(c.tip) ? 'geliri' : 'gideri';
+  return `Kontrat ${yon}: ${parca || 'Mülk'} (${tipLabel})`;
 }
-async function syncContractGelir(contract) {
+// Bir kontrat taksitli (peşinat + N taksit) satılmış olabilir — bu durumda kontratın
+// tek bir gelir/gider satırı yerine, her taksit için AYRI bir gelir/gider satırı tutulur
+// (taksit_id ile eşleştirilir), böylece hangi taksidin tahsil/ödenmiş olduğu ayrı ayrı
+// işaretlenebilir. Bir taksit satırı ilk oluştuğunda durum her zaman "ÖDENMEDİ" ve tarihi
+// taksidin vade tarihidir; sonrasında kullanıcı bunu Gelir/Gider sayfasından kendi yönetir —
+// sonraki senkronizasyonlar durum/tarihe DOKUNMAZ (sadece tutar_manuel değilse tutarı,
+// ve taraf/açıklama/proje gibi kontrattan gelen bilgileri tazeler).
+async function syncContractFinans(contract) {
   if (!contract) return;
-  const { rows: existing } = await q('select id from gelirler where kontrat_id = $1', [contract.id]);
+  const gelirYonlu = KONTRAT_GELIR_TIPLERI.includes(contract.tip);
+  const dogruTablo = gelirYonlu ? 'gelirler' : 'expenses';
+  const yanlisTablo = gelirYonlu ? 'expenses' : 'gelirler';
+  // Kontratın tipi değişmiş olabilir (ör. Malik'ten Taşeron'a) — yanlış yöndeki eski kaydı temizle.
+  await q(`delete from ${yanlisTablo} where kontrat_id = $1`, [contract.id]);
+
   if (contract.gelir_olustur === false) {
-    if (existing.length) await q('delete from gelirler where kontrat_id = $1', [contract.id]);
+    await q(`delete from ${dogruTablo} where kontrat_id = $1`, [contract.id]);
     return;
   }
+
+  const { rows: taksitler } = await q(
+    'select * from kontrat_taksitler where kontrat_id = $1 order by taksit_no, id',
+    [contract.id]
+  );
+  const notMetni = 'Bu kayıt, ilgili kontrattan otomatik oluşturuldu/güncellendi. Değiştirmek için Kontratlar sekmesinden kontratı düzenleyin.';
+
+  if (taksitler.length) {
+    // Artık plan dışında kalmış (silinmiş) taksitlere ait eski satırları temizle.
+    const gecerliIdler = taksitler.map((t) => t.id);
+    await q(
+      `delete from ${dogruTablo} where kontrat_id = $1 and (taksit_id is null or not (taksit_id = any($2::bigint[])))`,
+      [contract.id, gecerliIdler]
+    );
+    for (const taksit of taksitler) {
+      const aciklama = `${kontratFinansAciklama(contract)} — ${taksit.taksit_no || ''}. Taksit`.replace('—  .', '—');
+      const { rows: existing } = await q(`select id from ${dogruTablo} where taksit_id = $1`, [taksit.id]);
+      if (gelirYonlu) {
+        if (existing.length) {
+          await q(
+            `update gelirler set aciklama = $2, tutar = case when tutar_manuel then tutar else $3 end,
+               proje_id = $4, not_metni = $5, taraf = $6 where taksit_id = $1`,
+            [taksit.id, aciklama, taksit.tutar ?? null, contract.proje_id ?? null, notMetni, contract.karsi_taraf ?? null]
+          );
+        } else {
+          await q(
+            `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, proje_id, not_metni, kontrat_id, taraf, taksit_id)
+             values ($1,$2,$3,$4,'ÖDENMEDİ',$5,$6,$7,$8,$9)`,
+            [contract.isletme_id, aciklama, taksit.tutar ?? null, taksit.vade_tarihi, contract.proje_id ?? null, notMetni, contract.id, contract.karsi_taraf ?? null, taksit.id]
+          );
+        }
+      } else {
+        if (existing.length) {
+          await q(
+            `update expenses set gider_turu = $2, firma = $3, tutar = case when tutar_manuel then tutar else $4 end,
+               proje_id = $5, not_metni = $6, taraf = $7, kategori = 'sabit' where taksit_id = $1`,
+            [taksit.id, KONTRAT_TIP_LABELS.taseron, contract.karsi_taraf ?? null, taksit.tutar ?? null, contract.proje_id ?? null, notMetni, contract.karsi_taraf ?? null]
+          );
+        } else {
+          await q(
+            `insert into expenses (isletme_id, gider_turu, firma, tutar, tarih, durum, proje_id, not_metni, kontrat_id, taraf, kategori, taksit_id)
+             values ($1,$2,$3,$4,$5,'ÖDENMEDİ',$6,$7,$8,$9,'sabit',$10)`,
+            [contract.isletme_id, KONTRAT_TIP_LABELS.taseron, contract.karsi_taraf ?? null, taksit.tutar ?? null, taksit.vade_tarihi, contract.proje_id ?? null, notMetni, contract.id, contract.karsi_taraf ?? null, taksit.id]
+          );
+        }
+      }
+    }
+    return;
+  }
+
+  // Taksitsiz (basit/peşin) plan: tek satır, kontrat_id ile eşleştirilir.
+  await q(`delete from ${dogruTablo} where kontrat_id = $1 and taksit_id is not null`, [contract.id]);
   const durum = kontratGelirDurum(contract.durum);
-  const aciklama = kontratGelirAciklama(contract);
+  const aciklama = kontratFinansAciklama(contract);
   const tarih = contract.baslangic_tarihi || new Date().toISOString().slice(0, 10);
-  const notMetni = 'Bu gelir, ilgili kontrattan otomatik oluşturuldu/güncellendi. Değiştirmek için Kontratlar sekmesinden kontratı düzenleyin.';
-  if (existing.length) {
-    await q(
-      `update gelirler set aciklama = $2, tutar = case when tutar_manuel then tutar else $3 end,
-         tarih = $4, durum = $5, proje_id = $6, not_metni = $7 where kontrat_id = $1`,
-      [contract.id, aciklama, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni]
-    );
+  const { rows: existing } = await q(`select id from ${dogruTablo} where kontrat_id = $1 and taksit_id is null`, [contract.id]);
+  if (gelirYonlu) {
+    if (existing.length) {
+      await q(
+        `update gelirler set aciklama = $2, tutar = case when tutar_manuel then tutar else $3 end,
+           tarih = $4, durum = $5, proje_id = $6, not_metni = $7, taraf = $8 where kontrat_id = $1 and taksit_id is null`,
+        [contract.id, aciklama, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni, contract.karsi_taraf ?? null]
+      );
+    } else {
+      await q(
+        `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, proje_id, not_metni, kontrat_id, taraf)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [contract.isletme_id, aciklama, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni, contract.id, contract.karsi_taraf ?? null]
+      );
+    }
   } else {
-    await q(
-      `insert into gelirler (isletme_id, aciklama, tutar, tarih, durum, proje_id, not_metni, kontrat_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [contract.isletme_id, aciklama, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni, contract.id]
-    );
+    if (existing.length) {
+      await q(
+        `update expenses set gider_turu = $2, firma = $3, tutar = case when tutar_manuel then tutar else $4 end,
+           tarih = $5, durum = $6, proje_id = $7, not_metni = $8, taraf = $9, kategori = 'sabit' where kontrat_id = $1 and taksit_id is null`,
+        [contract.id, KONTRAT_TIP_LABELS.taseron, contract.karsi_taraf ?? null, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni, contract.karsi_taraf ?? null]
+      );
+    } else {
+      await q(
+        `insert into expenses (isletme_id, gider_turu, firma, tutar, tarih, durum, proje_id, not_metni, kontrat_id, taraf, kategori)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'sabit')`,
+        [contract.isletme_id, KONTRAT_TIP_LABELS.taseron, contract.karsi_taraf ?? null, contract.tutar ?? null, tarih, durum, contract.proje_id ?? null, notMetni, contract.id, contract.karsi_taraf ?? null]
+      );
+    }
   }
 }
 
@@ -346,7 +444,7 @@ app.post('/api/contracts', requireAuth, async (req, res) => {
       [
         isletme_id,
         mulk_adi ?? null,
-        tip === 'kiralik' ? 'kiralik' : 'satilik',
+        ['satilik', 'kiralik', 'malik', 'taseron'].includes(tip) ? tip : 'satilik',
         karsi_taraf ?? null,
         tutar ?? null,
         baslangic_tarihi ?? null,
@@ -360,7 +458,7 @@ app.post('/api/contracts', requireAuth, async (req, res) => {
         gelir_olustur === false ? false : true,
       ]
     );
-    await syncContractGelir(rows[0]);
+    await syncContractFinans(rows[0]);
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -391,7 +489,7 @@ app.put('/api/contracts/:id', requireAuth, async (req, res) => {
       [
         req.params.id,
         mulk_adi ?? null,
-        tip === 'kiralik' ? 'kiralik' : 'satilik',
+        ['satilik', 'kiralik', 'malik', 'taseron'].includes(tip) ? tip : 'satilik',
         karsi_taraf ?? null,
         tutar ?? null,
         baslangic_tarihi ?? null,
@@ -406,8 +504,51 @@ app.put('/api/contracts/:id', requireAuth, async (req, res) => {
         gelir_olustur === false ? false : true,
       ]
     );
-    await syncContractGelir(rows[0]);
+    await syncContractFinans(rows[0]);
     res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bir kontratın taksitli ödeme planını tamamen değiştirir (satılık/malik anlaşmalarında
+// peşinat + taksitler; taşeronda da hakediş bazlı ödeme planı için kullanılabilir).
+// Gönderilen listedeki id'si olan satırlar güncellenir (taksit_id sabit kalır, bağlı
+// gelir/gider kaydının durumu/tarihi korunur), id'siz olanlar yeni taksit olarak eklenir,
+// listede artık olmayan eski taksitler silinir (bağlı gelir/gider kaydı da cascade ile silinir).
+app.put('/api/contracts/:id/taksitler', requireAuth, async (req, res) => {
+  try {
+    const kontratId = Number(req.params.id);
+    const list = Array.isArray((req.body || {}).taksitler) ? req.body.taksitler : [];
+    const { rows: existing } = await q('select id from kontrat_taksitler where kontrat_id = $1', [kontratId]);
+    const existingIds = new Set(existing.map((r) => Number(r.id)));
+    const keepIds = new Set();
+    let taksitNo = 0;
+    for (const t of list) {
+      taksitNo += 1;
+      const tarih = t.tarih ?? t.vade_tarihi ?? null;
+      const tutar = t.tutar ?? null;
+      if (t.id && existingIds.has(Number(t.id))) {
+        await q('update kontrat_taksitler set taksit_no = $2, vade_tarihi = $3, tutar = $4 where id = $1', [Number(t.id), taksitNo, tarih, tutar]);
+        keepIds.add(Number(t.id));
+      } else {
+        const { rows } = await q(
+          'insert into kontrat_taksitler (kontrat_id, taksit_no, vade_tarihi, tutar) values ($1,$2,$3,$4) returning id',
+          [kontratId, taksitNo, tarih, tutar]
+        );
+        keepIds.add(Number(rows[0].id));
+      }
+    }
+    const silinecekler = [...existingIds].filter((id) => !keepIds.has(id));
+    if (silinecekler.length) {
+      await q('delete from kontrat_taksitler where id = any($1::bigint[])', [silinecekler]);
+    }
+    const { rows: cRows } = await q(`select ${CONTRACT_RETURNING} from contracts where id = $1`, [kontratId]);
+    if (!cRows.length) return res.status(404).json({ error: 'Kontrat bulunamadı' });
+    await syncContractFinans(cRows[0]);
+    const { rows: taksitRows } = await q('select * from kontrat_taksitler where kontrat_id = $1 order by taksit_no, id', [kontratId]);
+    res.json({ contract: cRows[0], taksitler: taksitRows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -466,6 +607,9 @@ app.delete('/api/projeler/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/contracts/:id', requireAuth, async (req, res) => {
   try {
+    // Kontrata bağlı otomatik gelir/gider kaydı hangi yöndeyse onu da temizle.
+    await q('delete from gelirler where kontrat_id = $1', [req.params.id]);
+    await q('delete from expenses where kontrat_id = $1', [req.params.id]);
     await q('delete from contracts where id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
@@ -512,11 +656,11 @@ function guessExpenseKategori(giderTuru, provided) {
 
 app.post('/api/expenses', requireAuth, async (req, res) => {
   try {
-    const { isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori } = req.body || {};
+    const { isletme_id, ay, gider_turu, firma, taraf, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori, kdv_tevkifat_tutar, odeme_sekli, fatura_no, kdv_orani, kdv_tutari, belge_ad, belge_tip, belge_data } = req.body || {};
     const { rows } = await q(
-      `insert into expenses (isletme_id, ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning *`,
-      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null, guessExpenseKategori(gider_turu, kategori)]
+      `insert into expenses (isletme_id, ay, gider_turu, firma, taraf, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori, kdv_tevkifat_tutar, odeme_sekli, fatura_no, kdv_orani, kdv_tutari, belge_ad, belge_tip, belge_data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) returning ${EXPENSE_RETURNING}`,
+      [isletme_id, ay ?? null, gider_turu ?? null, firma ?? null, taraf ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null, guessExpenseKategori(gider_turu, kategori), kdv_tevkifat_tutar ?? null, odeme_sekli ?? null, fatura_no ?? null, kdv_orani ?? null, kdv_tutari ?? null, belge_ad ?? null, belge_tip ?? null, belge_data ?? null]
     );
     await syncMaintenanceFromExpense(rows[0]);
     res.json(rows[0]);
@@ -528,11 +672,27 @@ app.post('/api/expenses', requireAuth, async (req, res) => {
 
 app.put('/api/expenses/:id', requireAuth, async (req, res) => {
   try {
-    const { ay, gider_turu, firma, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori } = req.body || {};
+    const { ay, gider_turu, firma, taraf, tutar, tarih, durum, not_metni, bakim_id, proje_id, kategori, kdv_tevkifat_tutar, odeme_sekli, fatura_no, kdv_orani, kdv_tutari, belge_ad, belge_tip, belge_data, remove_belge } = req.body || {};
+    // Bir kontrattan (taşeron) otomatik oluşan giderin tutarı burada elle değiştirilirse
+    // (net tutar sözleşmeden farklıysa), tutar_manuel işaretlenir ki kontrat bir sonraki
+    // güncellemesinde bu tutarı geri ezmesin.
+    const { rows: existingRows } = await q('select kontrat_id from expenses where id = $1', [req.params.id]);
+    const kontratGideriMi = !!(existingRows[0] && existingRows[0].kontrat_id);
     const { rows } = await q(
-      `update expenses set ay = $2, gider_turu = $3, firma = $4, tutar = $5, tarih = $6, durum = $7, not_metni = $8, bakim_id = $9, proje_id = $10, kategori = $11
-       where id = $1 returning *`,
-      [req.params.id, ay ?? null, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null, guessExpenseKategori(gider_turu, kategori)]
+      `update expenses set ay = $2, gider_turu = $3, firma = $4, taraf = $5, tutar = $6, tarih = $7, durum = $8, not_metni = $9,
+         bakim_id = $10, proje_id = $11, kategori = $12, kdv_tevkifat_tutar = $13,
+         odeme_sekli = $19, fatura_no = $20, kdv_orani = $21, kdv_tutari = $22,
+         belge_ad = case when $14::boolean then null when $15::text is not null then $15 else belge_ad end,
+         belge_tip = case when $14::boolean then null when $16::text is not null then $16 else belge_tip end,
+         belge_data = case when $14::boolean then null when $17::text is not null then $17 else belge_data end,
+         tutar_manuel = case when $18::boolean then true else tutar_manuel end
+       where id = $1 returning ${EXPENSE_RETURNING}`,
+      [
+        req.params.id, ay ?? null, gider_turu ?? null, firma ?? null, taraf ?? null, tutar ?? null, tarih ?? null,
+        durum || 'ÖDENMEDİ', not_metni ?? null, bakim_id ?? null, proje_id ?? null, guessExpenseKategori(gider_turu, kategori),
+        kdv_tevkifat_tutar ?? null, !!remove_belge, belge_ad ?? null, belge_tip ?? null, belge_data ?? null, kontratGideriMi,
+        odeme_sekli ?? null, fatura_no ?? null, kdv_orani ?? null, kdv_tutari ?? null,
+      ]
     );
     await syncMaintenanceFromExpense(rows[0]);
     res.json(rows[0]);
@@ -552,15 +712,32 @@ app.delete('/api/expenses/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Belge (fatura/makbuz/fotoğraf) indirme/görüntüleme — base64 olarak saklanan içeriği ham dosya olarak döner
+app.get('/api/expenses/:id/belge', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await q('select belge_ad, belge_tip, belge_data from expenses where id = $1', [req.params.id]);
+    const row = rows[0];
+    if (!row || !row.belge_data) return res.status(404).json({ error: 'Belge bulunamadı' });
+    const buffer = Buffer.from(row.belge_data, 'base64');
+    res.set('Content-Type', row.belge_tip || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename="${(row.belge_ad || 'belge').replace(/"/g, '')}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ------------------------------------------------------------------
 // Personel
 // ------------------------------------------------------------------
 app.post('/api/staff', requireAuth, async (req, res) => {
   try {
-    const { isletme_id, isim, gorev, aylik_ucret } = req.body || {};
+    const { isletme_id, isim, gorev, aylik_ucret, proje_id, belge_ad, belge_tip, belge_data } = req.body || {};
     const { rows } = await q(
-      `insert into staff (isletme_id, isim, gorev, aylik_ucret) values ($1, $2, $3, $4) returning *`,
-      [isletme_id, isim ?? null, gorev ?? null, aylik_ucret ?? null]
+      `insert into staff (isletme_id, isim, gorev, aylik_ucret, proje_id, belge_ad, belge_tip, belge_data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning ${STAFF_RETURNING}`,
+      [isletme_id, isim ?? null, gorev ?? null, aylik_ucret ?? null, proje_id ?? null, belge_ad ?? null, belge_tip ?? null, belge_data ?? null]
     );
     res.json(rows[0]);
   } catch (err) {
@@ -571,12 +748,43 @@ app.post('/api/staff', requireAuth, async (req, res) => {
 
 app.put('/api/staff/:id', requireAuth, async (req, res) => {
   try {
-    const { isim, gorev, aylik_ucret } = req.body || {};
+    const { isim, gorev, aylik_ucret, proje_id, remove_belge, belge_ad, belge_tip, belge_data } = req.body || {};
     const { rows } = await q(
-      `update staff set isim = $2, gorev = $3, aylik_ucret = $4 where id = $1 returning *`,
-      [req.params.id, isim ?? null, gorev ?? null, aylik_ucret ?? null]
+      `update staff set isim = $2, gorev = $3, aylik_ucret = $4, proje_id = $5,
+         belge_ad = case when $6::boolean then null when $7::text is not null then $7 else belge_ad end,
+         belge_tip = case when $6::boolean then null when $8::text is not null then $8 else belge_tip end,
+         belge_data = case when $6::boolean then null when $9::text is not null then $9 else belge_data end
+       where id = $1 returning ${STAFF_RETURNING}`,
+      [req.params.id, isim ?? null, gorev ?? null, aylik_ucret ?? null, proje_id ?? null, !!remove_belge, belge_ad ?? null, belge_tip ?? null, belge_data ?? null]
     );
     res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/staff/:id', requireAuth, async (req, res) => {
+  try {
+    await q('delete from staff_payments where staff_id = $1', [req.params.id]);
+    await q('delete from staff where id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Belge (SGK hizmet dökümü, tahakkuk fişi, kimlik vb.) indirme/görüntüleme
+app.get('/api/staff/:id/belge', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await q('select belge_ad, belge_tip, belge_data from staff where id = $1', [req.params.id]);
+    const row = rows[0];
+    if (!row || !row.belge_data) return res.status(404).json({ error: 'Belge bulunamadı' });
+    const buffer = Buffer.from(row.belge_data, 'base64');
+    res.set('Content-Type', row.belge_tip || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename="${(row.belge_ad || 'belge').replace(/"/g, '')}"`);
+    res.send(buffer);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
