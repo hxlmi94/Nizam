@@ -2631,4 +2631,325 @@ function exportGelirGiderExcel(d){
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aylik), 'Aylık Aidat');
   } else {
     const gelirSheet = [['Açıklama','Tutar','Tarih'], ...STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').map(g=>[g.aciklama||'', g.tutar, g.tarih||''])];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(gelirSheet), 'Gelirler');
+  }
+
+  const giderler = [['Gider Türü','Tutar'], ...Object.entries(d.giderByTur), ['Personel Maaşları (ödenen)', d.personelOdemeToplam]];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(giderler), 'Giderler');
+
+  XLSX.writeFile(wb, (isletmeAdi.replace(/[^a-zA-Z0-9ığüşöçİĞÜŞÖÇ]+/g,'-'))+'-gelir-gider-'+todayISO()+'.xlsx');
+}
+
+/* ---------------------------- YILLIK KARŞILAŞTIRMA ---------------------------- */
+function computeYillikKarsilastirma(){
+  const site = isSiteTipi();
+  const now = new Date();
+  const thisYear = String(now.getFullYear());
+  const lastYear = String(now.getFullYear()-1);
+
+  const gelirByYear = {};
+  let gelirYilBilinmiyor = 0;
+  if(site){
+    STATE.payments.filter(p=>p.tur==='aidat' && p.tutar_odenen).forEach(p=>{
+      const y = p.donem ? p.donem.slice(0,4) : null;
+      if(!y) return;
+      gelirByYear[y] = (gelirByYear[y]||0) + (Number(p.tutar_odenen)||0);
+    });
+  } else {
+    STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').forEach(g=>{
+      if(!g.tarih){ gelirYilBilinmiyor += Number(g.tutar)||0; return; }
+      const y = g.tarih.slice(0,4);
+      gelirByYear[y] = (gelirByYear[y]||0) + (Number(g.tutar)||0);
+    });
+  }
+
+  const giderByYear = {};
+  let giderYilBilinmiyor = 0;
+  STATE.expenses.filter(e=>e.durum==='ÖDENDİ').forEach(e=>{
+    if(!e.tarih){ giderYilBilinmiyor += Number(e.tutar)||0; return; }
+    const y = e.tarih.slice(0,4);
+    giderByYear[y] = (giderByYear[y]||0) + (Number(e.tutar)||0);
+  });
+
+  const personelByYear = {};
+  STATE.staffPayments.filter(sp=>sp.durum==='ÖDENDİ').forEach(sp=>{
+    const y = sp.ay ? sp.ay.slice(0,4) : null;
+    if(!y) return;
+    const st = STATE.staff.find(x=>x.id===sp.staff_id);
+    personelByYear[y] = (personelByYear[y]||0) + (st ? Number(st.aylik_ucret)||0 : 0);
+  });
+
+  function rowFor(y){
+    const gelir = gelirByYear[y]||0;
+    const gider = (giderByYear[y]||0) + (personelByYear[y]||0);
+    return {year:y, gelir, gider, net: gelir-gider};
+  }
+  function pctChange(a,b){ if(!b) return a>0 ? null : 0; return ((a-b)/b)*100; }
+  const cur = rowFor(thisYear), prev = rowFor(lastYear);
+  return {thisYear, lastYear, cur, prev, giderYilBilinmiyor, gelirYilBilinmiyor,
+    gelirChange: pctChange(cur.gelir, prev.gelir),
+    giderChange: pctChange(cur.gider, prev.gider)};
+}
+
+function pctBadge(pct, goodDirection){
+  // goodDirection: 'up' (artış iyi, ör. gelir) veya 'down' (artış kötü, ör. gider)
+  if(pct===null) return `<span class="chip" style="background:var(--neutral-chip);color:var(--ink-dim);">yeni</span>`;
+  const up = pct>=0;
+  const iyi = goodDirection==='up' ? up : !up;
+  const color = iyi ? 'var(--success)' : 'var(--danger)';
+  return `<span class="mono" style="font-weight:700;color:${color};">${up?'+':''}${pct.toFixed(1)}%</span>`;
+}
+
+function openYillikKarsilastirmaReport(){
+  const d = computeYillikKarsilastirma();
+  const isletmeAdi = currentIsletme()?.ad || '';
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Yıllık Karşılaştırma</h2>
+      ${reportBackClose()}
+    </div>
+    <div id="printArea">
+      <h3 style="margin-bottom:2px;">${esc(isletmeAdi)} — Yıllık Karşılaştırma</h3>
+      <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+      <div class="divider" style="margin:0 0 18px;"></div>
+
+      <div class="section-title">${d.thisYear} — ${d.lastYear}</div>
+      ${svgBarChart([
+        {short:"'"+d.lastYear.slice(2)+' Gelir', tutar:d.prev.gelir, color:'var(--brand-2)'},
+        {short:"'"+d.thisYear.slice(2)+' Gelir', tutar:d.cur.gelir, color:'var(--brand)'},
+        {short:"'"+d.lastYear.slice(2)+' Gider', tutar:d.prev.gider, color:'var(--gold-line)'},
+        {short:"'"+d.thisYear.slice(2)+' Gider', tutar:d.cur.gider, color:'var(--gold)'},
+      ])}
+
+      <table class="plain" style="margin-top:8px;"><thead><tr><th>Kalem</th><th>${d.lastYear}</th><th>${d.thisYear}</th><th>Değişim</th></tr></thead><tbody>
+        <tr><td>Gelir</td><td class="mono">${tl(d.prev.gelir)}</td><td class="mono">${tl(d.cur.gelir)}</td><td style="text-align:right;">${pctBadge(d.gelirChange,'up')}</td></tr>
+        <tr><td>Gider</td><td class="mono">${tl(d.prev.gider)}</td><td class="mono">${tl(d.cur.gider)}</td><td style="text-align:right;">${pctBadge(d.giderChange,'down')}</td></tr>
+        <tr><td><b>Net</b></td><td class="mono"><b>${tl(d.prev.net)}</b></td><td class="mono"><b>${tl(d.cur.net)}</b></td><td></td></tr>
+      </tbody></table>
+
+      ${d.giderYilBilinmiyor ? `<p style="color:var(--ink-dim);font-size:11.5px;margin-top:14px;">Not: Tarihi girilmemiş ${tl(d.giderYilBilinmiyor)} tutarında gider bu karşılaştırmaya dahil edilmedi.</p>` : ''}
+      ${d.gelirYilBilinmiyor ? `<p style="color:var(--ink-dim);font-size:11.5px;margin-top:4px;">Not: Tarihi girilmemiş ${tl(d.gelirYilBilinmiyor)} tutarında gelir bu karşılaştırmaya dahil edilmedi.</p>` : ''}
+    </div>
+    <button class="btn btn-primary btn-block no-print" id="printBtn" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('printBtn').onclick = ()=> window.print();
+}
+
+/* ---------------------------- CARİ HESAP EKSTRESİ ---------------------------- */
+function openCariEkstreSheet(){
+  const firmalar = [...new Set(STATE.expenses.map(e=>e.firma).filter(Boolean))].sort();
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Cari Hesap Ekstresi</h2>
+      ${reportBackClose()}
+    </div>
+    <div class="field"><label>Firma seçin</label>
+      <select id="ekstre_firma">
+        <option value="">— Firma seçin —</option>
+        ${firmalar.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="ekstre_result"></div>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('ekstre_firma').onchange = (e)=>{
+    const firma = e.target.value;
+    const result = document.getElementById('ekstre_result');
+    if(!firma){ result.innerHTML=''; return; }
+    const rows = STATE.expenses.filter(x=>x.firma===firma).sort((a,b)=>(a.tarih||'').localeCompare(b.tarih||''));
+    const toplam = rows.filter(r=>r.durum==='ÖDENDİ').reduce((s,r)=>s+(Number(r.tutar)||0),0);
+    const bekleyen = rows.filter(r=>r.durum!=='ÖDENDİ').reduce((s,r)=>s+(Number(r.tutar)||0),0);
+    result.innerHTML = `
+      <div id="printArea">
+        <h3 style="margin-bottom:2px;">${esc(currentIsletme()?.ad||'')} — Cari Hesap Ekstresi</h3>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">${esc(firma)} — Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+        <div class="divider" style="margin:0 0 18px;"></div>
+        <div class="stat-grid" style="margin-bottom:16px;">
+          <div class="stat-card"><div class="label">Ödenen Toplam</div><div class="value small">${tl(toplam)}</div></div>
+          <div class="stat-card"><div class="label">Bekleyen</div><div class="value small">${tl(bekleyen)}</div></div>
+        </div>
+        <table class="plain"><thead><tr><th>Tarih</th><th>Gider Türü</th><th>Durum</th><th>Tutar</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr><td>${r.tarih||'—'}</td><td>${esc(r.gider_turu||'')}</td><td>${esc(r.durum||'')}</td><td class="mono">${tl(r.tutar)}</td></tr>`).join('') || '<tr><td colspan="4">Kayıt yok</td></tr>'}
+        </tbody></table>
+      </div>
+      <button class="btn btn-primary btn-block no-print" id="ekstre_print" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+    `;
+    document.getElementById('ekstre_print').onclick = ()=> window.print();
+  };
+}
+
+function openIsletmeProjesiSheet(){
+  const staffToplam = STATE.staff.reduce((s,p)=>s+(Number(p.aylik_ucret)||0),0);
+  const alanToplam = STATE.apartments.reduce((s,a)=>s+(Number(a.toplam_brut_alan)||0),0);
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">İşletme Projesi Hesaplayıcı</h2>
+      ${reportBackClose()}
+    </div>
+    <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">Kat Mülkiyeti Kanunu'na göre; personel gibi ortak hizmet giderleri dairelere eşit, diğer giderler ise dairenin alanı oranında dağıtılır. Tutarları girip hesaplayın.</p>
+
+    <div class="field"><label>Aylık Personel Gideri (eşit dağıtılır)</label><input type="text" inputmode="decimal" id="ip_personel" value="${staffToplam||''}" /></div>
+    <div class="field"><label>Aylık Diğer Sabit Giderler (elektrik, su, asansör bakımı, sigorta vb. — alan oranında dağıtılır)</label><input type="text" inputmode="decimal" id="ip_diger" placeholder="0" /></div>
+    <div class="field" style="margin-bottom:6px;"><label>Yedek Akçe Oranı (%)</label><input type="number" inputmode="decimal" id="ip_yedek" value="10" /></div>
+    <p style="color:var(--ink-dim);font-size:11px;margin:0 0 14px;">Not: Yedek akçe genellikle yıllık gider toplamının %10'unu aşmayacak şekilde belirlenir. Kesin oran için mali müşavirinize danışın.</p>
+    <button class="btn btn-gold btn-block" id="ip_hesapla">Hesapla</button>
+    <div id="ip_result"></div>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('ip_hesapla').onclick = ()=>{
+    const personel = parseTLInput(document.getElementById('ip_personel').value)||0;
+    const diger = parseTLInput(document.getElementById('ip_diger').value)||0;
+    const yedekOran = Number(document.getElementById('ip_yedek').value)||0;
+    const araToplam = personel + diger;
+    const yedek = araToplam * (yedekOran/100);
+    const genelToplam = araToplam + yedek;
+    const esitPay = STATE.apartments.length ? personel/STATE.apartments.length : 0;
+
+    const rows = STATE.apartments.map(a=>{
+      const alanOrani = alanToplam ? (Number(a.toplam_brut_alan)||0)/alanToplam : 0;
+      const oranliPay = (diger+yedek) * alanOrani;
+      return {no:a.no, malik:a.malik, toplam: esitPay + oranliPay};
+    });
+    const toplamAidat = rows.reduce((s,r)=>s+r.toplam,0);
+
+    document.getElementById('ip_result').innerHTML = `
+      <div id="printArea">
+        <div class="divider"></div>
+        <h3 style="margin-bottom:2px;">${esc(currentIsletme()?.ad||'')} — İşletme Projesi</h3>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 16px;">Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+        <div class="stat-grid" style="margin-bottom:16px;">
+          <div class="stat-card"><div class="label">Aylık Toplam Gider</div><div class="value small">${tl(genelToplam)}</div></div>
+          <div class="stat-card"><div class="label">Yedek Akçe</div><div class="value small">${tl(yedek)}</div></div>
+        </div>
+        <div class="section-title">Daire Bazında Aylık Aidat</div>
+        <table class="plain"><thead><tr><th>Daire</th><th>Malik</th><th>Aidat</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr><td>${r.no}</td><td>${esc(r.malik||'')}</td><td class="mono">${tl(r.toplam)}</td></tr>`).join('')}
+          <tr><td colspan="2"><b>Toplam</b></td><td class="mono"><b>${tl(toplamAidat)}</b></td></tr>
+        </tbody></table>
+      </div>
+      <button class="btn btn-primary btn-block no-print" id="ip_print" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+    `;
+    document.getElementById('ip_print').onclick = ()=> window.print();
+  };
+}
+
+function openGenelKurulReport(){
+  const d = computeGelirGider();
+  const unpaid = STATE.currentMonth ? STATE.apartments.filter(a=>{
+    const p = paymentFor(a.no,'aidat',STATE.currentMonth);
+    return !p || p.durum!=='ÖDENDİ';
+  }) : [];
+  const notlar = STATE.settings.genel_kurul_notu || '';
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Genel Kurul Özet Raporu</h2>
+      ${reportBackClose()}
+    </div>
+    <div id="printArea">
+      <h3 style="margin-bottom:2px;">${esc(currentIsletme()?.ad||'')} — Genel Kurul Özet Raporu</h3>
+      <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+      <div class="divider" style="margin:0 0 18px;"></div>
+
+      <div class="stat-grid" style="margin-bottom:16px;">
+        <div class="stat-card"><div class="label">Toplam Gelir</div><div class="value small">${tl(d.gelirToplam)}</div></div>
+        <div class="stat-card"><div class="label">Toplam Gider</div><div class="value small">${tl(d.giderGenelToplam)}</div></div>
+        <div class="stat-card"><div class="label">Net Durum</div><div class="value small">${tl(d.net)}</div></div>
+        <div class="stat-card"><div class="label">Personel Sayısı</div><div class="value small">${STATE.staff.length}</div></div>
+      </div>
+
+      <div class="section-title">${STATE.currentMonth?monthLabel(STATE.currentMonth):'Bu ay'} İtibarıyla Ödemeyen Daireler (${unpaid.length})</div>
+      ${unpaid.length ? `<table class="plain"><thead><tr><th>Daire</th><th>Malik</th></tr></thead><tbody>
+        ${unpaid.map(a=>`<tr><td>${a.no}</td><td>${esc(a.malik||'')}</td></tr>`).join('')}
+      </tbody></table>` : '<p style="font-size:13px;color:var(--ink-dim);">Tüm daireler güncel.</p>'}
+
+      <div class="section-title">Personel Özeti</div>
+      <table class="plain"><thead><tr><th>İsim</th><th>Görev</th><th>Aylık Ücret</th></tr></thead><tbody>
+        ${STATE.staff.map(p=>`<tr><td>${esc(p.isim||'—')}</td><td>${esc(p.gorev)}</td><td class="mono">${tl(p.aylik_ucret)}</td></tr>`).join('') || '<tr><td colspan="3">Kayıt yok</td></tr>'}
+      </tbody></table>
+
+      <div class="section-title">Notlar</div>
+      <p id="notlarPrint" style="white-space:pre-wrap;font-size:13.5px;">${esc(notlar)||'—'}</p>
+    </div>
+
+    <div class="field no-print" style="margin-top:16px;">
+      <label>Genel kurulda paylaşmak istediğiniz ek notlar</label>
+      <textarea id="gk_notlar" placeholder="örn. asansör bakımı için teklif alındı...">${esc(notlar)}</textarea>
+    </div>
+    <button class="btn btn-ghost btn-block no-print" id="gk_save_note" style="margin-bottom:10px;">Notu Kaydet</button>
+    <button class="btn btn-primary btn-block no-print" id="gk_print">${ICON.printer} Yazdır / PDF Kaydet</button>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.getElementById('gk_save_note').onclick = async ()=>{
+    const v = document.getElementById('gk_notlar').value;
+    await saveSetting('genel_kurul_notu', v);
+    document.getElementById('notlarPrint').textContent = v || '—';
+    showToast('Not kaydedildi');
+  };
+  document.getElementById('gk_print').onclick = ()=> window.print();
+}
+
+const YASAL_ITEMS = [
+  {key:'karar_defteri', title:'Karar Defteri', desc:"Kat malikleri kurulunun aldığı tüm kararların yazıldığı, noter onaylı ve sayfaları numaralı defter. Her yıl sonunda (31 Aralık'a kadar) noterde kapanış tasdiki yaptırılmalı."},
+  {key:'gelir_gider_defteri', title:'Gelir-Gider Defteri', desc:'Tüm aidat tahsilatları ve giderlerin işlendiği, noter onaylı defter. Fatura ve makbuzların saklanması gerekir.'},
+  {key:'isletme_projesi', title:'İşletme Projesi', desc:"Yıllık tahmini gelir-gider ve her dairenin payını gösteren, kat maliklerine tebliğ edilmesi gereken belge (Kat Mülkiyeti Kanunu md. 37). Bu bölümdeki hesaplayıcıyı kullanarak oluşturabilirsiniz."},
+  {key:'genel_kurul_tutanagi', title:'Genel Kurul Toplantı Tutanağı', desc:'Yıllık olağan toplantıda alınan kararların, katılımcı imzalarıyla birlikte karar defterine işlenmiş hali.'},
+];
+
+function openYasalBelgelerSheet(){
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="backToHub">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Yasal Belgeler</h2>
+      ${reportBackClose()}
+    </div>
+    <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">Kat Mülkiyeti Kanunu'na göre bir site/apartman yönetiminin tutması gereken temel belgeler aşağıdadır. Elinizde olanları işaretleyin.</p>
+    <div class="row-list">
+      ${YASAL_ITEMS.map(it=>{
+        const checked = !!STATE.settings['yasal_'+it.key];
+        return `
+        <div class="card" style="padding:14px;">
+          <div style="display:flex;align-items:flex-start;gap:10px;">
+            <button type="button" class="yasal-check ${checked?'checked':''}" data-key="${it.key}">${checked?ICON.checkCircle:''}</button>
+            <div>
+              <b style="font-size:14px;">${it.title}</b>
+              <p style="margin:4px 0 0;font-size:12.5px;color:var(--ink-dim);line-height:1.5;">${it.desc}</p>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <p style="color:var(--ink-dim);font-size:11px;margin-top:16px;line-height:1.5;">Bu bilgiler genel bilgilendirme amaçlıdır, hukuki tavsiye niteliği taşımaz. Kesin ve güncel yükümlülükleriniz için bir mali müşavir veya avukata danışmanızı öneririz.</p>
+  `;
+  openSheet(html);
+  document.getElementById('backToHub').onclick = openReportsHub;
+  document.querySelectorAll('.yasal-check').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const key = 'yasal_'+btn.dataset.key;
+      const newVal = !STATE.settings[key];
+      await saveSetting(key, newVal);
+      openYasalBelgelerSheet();
+    };
+  });
+}
+
+/* ---------------------------- PWA (yüklenebilir uygulama) ---------------------------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  });
+}
+
+/* ---------------------------- START ---------------------------- */
+boot();
+</script>
+</body>
+</html>
