@@ -1336,31 +1336,56 @@ function renderGelir(){
   }
   const toplam = STATE.gelirler.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
   const bekleyen = STATE.gelirler.filter(g=>g.durum!=='ÖDENDİ').length;
+
+  // Tarihe göre aya grupla (örn. "Kasım 2025"), her ay Giderler sayfasındaki gibi kendi kapanır/açılır kutusunda gösterilsin.
+  const groups = {};
+  STATE.gelirler.forEach(g=>{
+    const key = g.tarih ? g.tarih.slice(0,7) : '__none__';
+    (groups[key] = groups[key] || []).push(g);
+  });
+  const groupKeys = Object.keys(groups).sort((a,b)=>{
+    if(a==='__none__') return 1;
+    if(b==='__none__') return -1;
+    return b.localeCompare(a); // en yeni ay en üstte
+  });
+
   return `
     <div class="kpis">
       <div class="kpi"><div class="lbl">Toplam Kayıt</div><div class="val">${STATE.gelirler.length}</div></div>
       <div class="kpi ${bekleyen?'warn':'good'}"><div class="lbl">Beklemede</div><div class="val">${bekleyen}</div></div>
       <div class="kpi good"><div class="lbl">Toplam Alınan Gelir</div><div class="val">${tl(toplam)}</div></div>
     </div>
-    <div class="table-card">
-      <div class="table-card-head"><h2>Gelir Kayıtları</h2></div>
-      <div class="table-scroll">
-        <table class="table-pro">
-          <thead><tr><th>Açıklama</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
-          <tbody>
-            ${STATE.gelirler.map(g=>`
-              <tr data-open-gelir="${g.id}">
-                <td class="name-cell">${esc(g.aciklama||'—')}${g.kontrat_id?` <span class="chip" style="background:var(--brand-soft);color:var(--brand);">Kontrat</span>`:''}</td>
-                ${STATE.projeler.length?`<td>${projeChip(g.proje_id)}</td>`:''}
-                <td>${g.tarih? new Date(g.tarih).toLocaleDateString('tr-TR'):'—'}</td>
-                <td class="num">${tl(g.tutar)}</td>
-                <td>${statusChip(g.durum)}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div class="table-foot-row"><span>${STATE.gelirler.length} kayıt</span><span>Toplam alınan: ${tl(toplam)}</span></div>
-    </div>
+    ${groupKeys.map((key,idx)=>{
+      const rows = groups[key];
+      const grupToplam = rows.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+      const label = key==='__none__' ? 'Tarih Belirtilmemiş' : monthLabel(key);
+      return `
+      <details class="table-card ay-group" style="margin-bottom:10px;" ${idx===0?'open':''}>
+        <summary class="table-card-head">
+          <h2>${esc(label)}</h2>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span style="font-size:11.5px;color:var(--ink-dim);">${rows.length} kayıt</span>
+            <span class="mono" style="font-weight:700;">${tl(grupToplam)}</span>
+            <span class="ay-group-chevron">${ICON.chevron}</span>
+          </div>
+        </summary>
+        <div class="table-scroll">
+          <table class="table-pro">
+            <thead><tr><th>Açıklama</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+            <tbody>
+              ${rows.map(g=>`
+                <tr data-open-gelir="${g.id}">
+                  <td class="name-cell">${esc(g.aciklama||'—')}${g.kontrat_id?` <span class="chip" style="background:var(--brand-soft);color:var(--brand);">Kontrat</span>`:''}</td>
+                  ${STATE.projeler.length?`<td>${projeChip(g.proje_id)}</td>`:''}
+                  <td>${g.tarih? new Date(g.tarih).toLocaleDateString('tr-TR'):'—'}</td>
+                  <td class="num">${tl(g.tutar)}</td>
+                  <td>${statusChip(g.durum)}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </details>`;
+    }).join('')}
   `;
 }
 
