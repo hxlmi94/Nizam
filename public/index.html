@@ -1579,11 +1579,10 @@ function openContractSheet(id, presetProjeId){
     <div class="field"><label>Tip</label>
       <div class="seg" data-role="tipSeg" style="flex-wrap:wrap;">
         <button type="button" data-tip="satilik" class="${(!k||k?.tip==='satilik')?'on odendi':''}">Satılık</button>
-        <button type="button" data-tip="kiralik" class="${k?.tip==='kiralik'?'on odendi':''}">Kiralık</button>
-        <button type="button" data-tip="malik" class="${k?.tip==='malik'?'on odendi':''}">Malik Anlaşması</button>
+        <button type="button" data-tip="kiralik" class="${(k?.tip==='kiralik'||k?.tip==='malik')?'on odendi':''}">Kiralık</button>
         <button type="button" data-tip="taseron" class="${k?.tip==='taseron'?'on kismi':''}">Taşeron</button>
       </div>
-      <div style="font-size:11px;color:var(--ink-dim);margin-top:6px;">Satılık/Kiralık/Malik Anlaşması → para içeri girer (Gelir). Taşeron → para dışarı çıkar (Gider).</div>
+      <div style="font-size:11px;color:var(--ink-dim);margin-top:6px;">Satılık/Kiralık → para içeri girer (Gelir). Taşeron → para dışarı çıkar (Gider).</div>
     </div>
     <div class="field"><label id="k_karsi_label">Karşı Taraf (Alıcı / Kiracı)</label><input id="k_karsi" value="${esc(k?.karsi_taraf||'')}" placeholder="örn. Ahmet Yılmaz" /></div>
     <div class="field"><label>Tutar (₺)</label><input id="k_tutar" type="text" inputmode="decimal" value="${k?.tutar??''}" /></div>
@@ -1878,7 +1877,7 @@ function renderProjeDetay(pid){
           ? `<div style="font-size:12px;color:var(--ink-dim);margin-top:4px;display:flex;align-items:center;gap:6px;">${projeDurumChip(proje.durum)}${proje.aciklama?'<span>· '+esc(proje.aciklama)+'</span>':''}</div>`
           : `<div style="font-size:12px;color:var(--ink-dim);margin-top:4px;">Belirli bir projeye bağlı olmayan şirket kayıtları</div>`}
       </div>
-      ${!isGenel ? `<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn-toolbar" id="projeButceBtn" type="button">${ICON.calculator} Bütçe</button><button class="btn-toolbar" id="projeIzinBtn" type="button">${ICON.gavel} İzin Takip</button><button class="btn-toolbar" id="projeEditBtn" type="button">Düzenle</button></div>` : ''}
+      ${!isGenel ? `<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn-toolbar" id="projeButceBtn" type="button">${ICON.calculator} Bütçe</button><button class="btn-toolbar" id="projeIzinBtn" type="button">${ICON.gavel} İzin Takip</button><button class="btn-toolbar" id="projeCariBtn" type="button">${ICON.reportIcon} Cari Hesap</button><button class="btn-toolbar" id="projeEditBtn" type="button">Düzenle</button></div>` : ''}
     </div>
 
     <div class="kpis" style="margin-top:14px;">
@@ -2255,6 +2254,8 @@ function wireMain(){
   if(projeButceBtn) projeButceBtn.onclick = ()=> openProjeButceSheet(STATE.projeView);
   const projeIzinBtn = document.getElementById('projeIzinBtn');
   if(projeIzinBtn) projeIzinBtn.onclick = ()=> openProjeIzinSheet(STATE.projeView);
+  const projeCariBtn = document.getElementById('projeCariBtn');
+  if(projeCariBtn) projeCariBtn.onclick = ()=> openProjeCariEkstreSheet(STATE.projeView);
   const reportsBtn = document.getElementById('openReportsBtn');
   if(reportsBtn) reportsBtn.onclick = openReportsHub;
   const aidatBtn = document.getElementById('openAidatTutariBtn');
@@ -2467,6 +2468,129 @@ function tarafOzet(taraf){
   const gelirToplam = gRows.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
   const giderToplam = eRows.filter(e=>e.durum==='ÖDENDİ').reduce((s,e)=>s+(Number(e.tutar)||0),0);
   return {gRows, eRows, gelirToplam, giderToplam};
+}
+// Aynı taraf/cari hesap özetleri, ama tek bir projenin (inşaat dosyasının) kayıtlarıyla sınırlı —
+// her proje kendi içinde ayrı bir hesap defteri gibi çalışsın diye.
+function tarafListesiForProje(pid){
+  const {gelirler, expenses} = kayitlarForProje(pid);
+  const set = new Set();
+  gelirler.forEach(g=>{ if(g.taraf) set.add(g.taraf); });
+  expenses.forEach(e=>{ if(e.taraf) set.add(e.taraf); });
+  return [...set].sort((a,b)=>a.localeCompare(b,'tr'));
+}
+function tarafOzetForProje(taraf, pid){
+  const {gelirler, expenses} = kayitlarForProje(pid);
+  const gRows = gelirler.filter(g=>g.taraf===taraf);
+  const eRows = expenses.filter(e=>e.taraf===taraf);
+  const gelirToplam = gRows.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+  const giderToplam = eRows.filter(e=>e.durum==='ÖDENDİ').reduce((s,e)=>s+(Number(e.tutar)||0),0);
+  return {gRows, eRows, gelirToplam, giderToplam};
+}
+// Bir projenin (inşaat dosyasının) kendi Cari Hesap Ekstresi — firma ya da kişi bazında,
+// sadece o projeye kayıtlı gelir/giderlerle sınırlı. Ofis Geneli / diğer projelerin
+// kayıtları buraya karışmaz.
+function openProjeCariEkstreSheet(pid){
+  const proje = STATE.projeler.find(p=>p.id===pid);
+  const {expenses} = kayitlarForProje(pid);
+  const firmalar = [...new Set(expenses.map(e=>e.firma).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'tr'));
+  const kisiler = tarafListesiForProje(pid);
+  const html = `
+    <div class="sheet-head">
+      <button class="close" id="pEkstreBack">${ICON.chevronLeft}</button>
+      <h2 style="flex:1;">Cari Hesap Ekstresi</h2>
+      <button class="close" data-close-sheet>${ICON.x}</button>
+    </div>
+    <p style="color:var(--ink-dim);font-size:12.5px;margin-top:-8px;">${esc(proje?.ad||'')} — sadece bu projeye kayıtlı gelir/giderler gösterilir.</p>
+    <div class="field"><label>Ne bazında bakmak istersin?</label>
+      <div class="seg" data-role="pEkstreModSeg">
+        <button type="button" data-mod="firma" class="on odendi">Firma</button>
+        <button type="button" data-mod="kisi">Kişi / Taraf</button>
+      </div>
+    </div>
+    <div class="field" id="p_ekstre_firma_field"><label>Firma seçin</label>
+      <select id="p_ekstre_firma">
+        <option value="">— Firma seçin —</option>
+        ${firmalar.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" id="p_ekstre_kisi_field" style="display:none;"><label>Kişi / taraf seçin</label>
+      <select id="p_ekstre_kisi">
+        <option value="">— Kişi seçin —</option>
+        ${kisiler.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('')}
+      </select>
+    </div>
+    <div id="p_ekstre_result"></div>
+  `;
+  openSheet(html);
+  document.getElementById('pEkstreBack').onclick = ()=> closeSheet();
+  const modSeg = document.querySelector('[data-role="pEkstreModSeg"]');
+  modSeg.querySelectorAll('[data-mod]').forEach(b=>{
+    b.onclick = ()=>{
+      modSeg.querySelectorAll('[data-mod]').forEach(x=>x.className='');
+      b.className = 'on odendi';
+      const kisiMod = b.dataset.mod==='kisi';
+      document.getElementById('p_ekstre_firma_field').style.display = kisiMod ? 'none' : '';
+      document.getElementById('p_ekstre_kisi_field').style.display = kisiMod ? '' : 'none';
+      document.getElementById('p_ekstre_result').innerHTML = '';
+    };
+  });
+  document.getElementById('p_ekstre_firma').onchange = (e)=>{
+    const firma = e.target.value;
+    const result = document.getElementById('p_ekstre_result');
+    if(!firma){ result.innerHTML=''; return; }
+    const rows = expenses.filter(x=>x.firma===firma).sort((a,b)=>(a.tarih||'').localeCompare(b.tarih||''));
+    const toplam = rows.filter(r=>r.durum==='ÖDENDİ').reduce((s,r)=>s+(Number(r.tutar)||0),0);
+    const bekleyen = rows.filter(r=>r.durum!=='ÖDENDİ').reduce((s,r)=>s+(Number(r.tutar)||0),0);
+    result.innerHTML = `
+      <div id="printArea">
+        <h3 style="margin-bottom:2px;">${esc(proje?.ad||'')} — Cari Hesap Ekstresi</h3>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">${esc(firma)} — Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+        <div class="divider" style="margin:0 0 18px;"></div>
+        <div class="stat-grid" style="margin-bottom:16px;">
+          <div class="stat-card"><div class="label">Ödenen Toplam</div><div class="value small">${tl(toplam)}</div></div>
+          <div class="stat-card"><div class="label">Bekleyen</div><div class="value small">${tl(bekleyen)}</div></div>
+        </div>
+        <table class="plain"><thead><tr><th>Tarih</th><th>Gider Türü</th><th>Durum</th><th>Tutar</th></tr></thead><tbody>
+          ${rows.map(r=>`<tr><td>${r.tarih||'—'}</td><td>${esc(r.gider_turu||'')}</td><td>${esc(r.durum||'')}</td><td class="mono">${tl(r.tutar)}</td></tr>`).join('') || '<tr><td colspan="4">Kayıt yok</td></tr>'}
+        </tbody></table>
+      </div>
+      <button class="btn btn-primary btn-block no-print" id="p_ekstre_print" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+    `;
+    document.getElementById('p_ekstre_print').onclick = ()=> window.print();
+  };
+  document.getElementById('p_ekstre_kisi').onchange = (e)=>{
+    const kisi = e.target.value;
+    const result = document.getElementById('p_ekstre_result');
+    if(!kisi){ result.innerHTML=''; return; }
+    const {gRows, eRows, gelirToplam, giderToplam} = tarafOzetForProje(kisi, pid);
+    const islemler = [
+      ...gRows.map(g=>({tarih:g.tarih, tur:'Alınan (Gelir)', aciklama:g.aciklama||'—', durum:g.durum, tutar:Number(g.tutar)||0, yon:1})),
+      ...eRows.map(e=>({tarih:e.tarih, tur:'Ödenen (Gider)', aciklama:e.gider_turu||'—', durum:e.durum, tutar:Number(e.tutar)||0, yon:-1})),
+    ].sort((a,b)=>(a.tarih||'').localeCompare(b.tarih||''));
+    let bakiye = 0;
+    const satirlar = islemler.map(x=>{
+      if(x.durum==='ÖDENDİ') bakiye += x.yon*x.tutar;
+      return `<tr><td>${x.tarih||'—'}</td><td>${esc(x.tur)}</td><td>${esc(x.aciklama)}</td><td>${esc(x.durum||'')}</td><td class="mono">${tl(x.tutar)}</td><td class="mono">${tl(bakiye)}</td></tr>`;
+    }).join('');
+    result.innerHTML = `
+      <div id="printArea">
+        <h3 style="margin-bottom:2px;">${esc(proje?.ad||'')} — Kişi Bazlı Cari Hesap</h3>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:0 0 14px;">${esc(kisi)} — Oluşturulma tarihi: ${new Date().toLocaleDateString('tr-TR')}</p>
+        <div class="divider" style="margin:0 0 18px;"></div>
+        <div class="stat-grid" style="margin-bottom:16px;">
+          <div class="stat-card"><div class="label">Bu Kişiden Alınan</div><div class="value small">${tl(gelirToplam)}</div></div>
+          <div class="stat-card"><div class="label">Bu Kişiye Ödenen</div><div class="value small">${tl(giderToplam)}</div></div>
+          <div class="stat-card"><div class="label">Net Bakiye</div><div class="value small" style="color:${(gelirToplam-giderToplam)>=0?'var(--success)':'var(--danger)'};">${tl(gelirToplam-giderToplam)}</div></div>
+        </div>
+        <p style="font-size:11px;color:var(--ink-dim);margin:0 0 10px;">Net bakiye pozitifse bu kişiden projeye net para girişi, negatifse projeden bu kişiye net ödeme var demektir.</p>
+        <table class="plain"><thead><tr><th>Tarih</th><th>Tür</th><th>Açıklama</th><th>Durum</th><th>Tutar</th><th>Bakiye</th></tr></thead><tbody>
+          ${satirlar || '<tr><td colspan="6">Kayıt yok</td></tr>'}
+        </tbody></table>
+      </div>
+      <button class="btn btn-primary btn-block no-print" id="p_ekstre_print2" style="margin-top:16px;">${ICON.printer} Yazdır / PDF Kaydet</button>
+    `;
+    document.getElementById('p_ekstre_print2').onclick = ()=> window.print();
+  };
 }
 
 /* ---------------------------- ÖN MUHASEBE: ödeme şekli, KDV, kasa/banka, taksitler ---------------------------- */
