@@ -930,6 +930,94 @@ const CHAT_TOOL_ADD_INCOME = {
     required: ['tutar'],
   },
 };
+const CHAT_TOOL_FIND_RECORDS = {
+  name: 'kayit_bul',
+  description:
+    'Var olan bir gelir veya gider kaydını bulur (id numarasıyla birlikte). Kullanıcı "şu kaydı düzelt/sil", "X\'in Y tarihli ödemesi yanlış girilmiş" gibi mevcut bir kaydı değiştirmeni/silmeni istediğinde, ÖNCE bu aracı kullanarak doğru kaydı ve id\'sini bul; ondan sonra gider_guncelle/gider_sil/gelir_guncelle/gelir_sil ile işlem yap. Birden fazla sonuç dönebilir — kullanıcının bahsettiği kaydı tarih/tutar/isim gibi bilgilerle eşleştir; birden fazla aday varsa ve emin olamıyorsan hangisini kastettiğini kullanıcıya sor.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      tip: { type: 'string', enum: ['gider', 'gelir'], description: 'Aranacak kayıt türü' },
+      arama: { type: 'string', description: 'Gider türü/firma/kişi adında veya gelir açıklamasında/tarafında geçebilecek anahtar kelime (kısmi eşleşme), örn. "Zebiullah"' },
+      tarih: { type: 'string', description: 'Tam tarih, YYYY-MM-DD formatında (opsiyonel)' },
+      tutar: { type: 'number', description: 'Tutar, tam eşleşme (opsiyonel)' },
+    },
+    required: ['tip'],
+  },
+};
+const CHAT_TOOL_UPDATE_EXPENSE = {
+  name: 'gider_guncelle',
+  description:
+    'Var olan bir gider kaydını günceller (durumunu ÖDENDİ/ÖDENMEDİ yapmak, tutarını/tarihini/türünü düzeltmek gibi). Önce kayit_bul ile doğru kaydın id\'sini bul. Sadece değişmesini istediğin alanları gönder; boş bıraktığın alanlar olduğu gibi kalır.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'number', description: 'Güncellenecek gider kaydının id numarası (kayit_bul ile bulunur)' },
+      gider_turu: { type: 'string' },
+      firma: { type: 'string' },
+      tutar: { type: 'number' },
+      tarih: { type: 'string', description: 'YYYY-MM-DD' },
+      ay: { type: 'string' },
+      durum: { type: 'string', enum: ['ÖDENDİ', 'ÖDENMEDİ'] },
+      not_metni: { type: 'string' },
+    },
+    required: ['id'],
+  },
+};
+const CHAT_TOOL_DELETE_EXPENSE = {
+  name: 'gider_sil',
+  description:
+    'Var olan bir gider kaydını kalıcı olarak siler (ör. mükerrer/yanlış girilmiş bir kayıt). Önce kayit_bul ile doğru kaydın id\'sini bul; işlemden sonra kullanıcıya hangi kaydı sildiğini (tür, tutar, tarih) açıkça özetle.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'number', description: 'Silinecek gider kaydının id numarası' },
+    },
+    required: ['id'],
+  },
+};
+const CHAT_TOOL_UPDATE_INCOME = {
+  name: 'gelir_guncelle',
+  description:
+    'Var olan bir gelir kaydını günceller (durumunu ÖDENDİ/ÖDENMEDİ yapmak, tutarını/tarihini/açıklamasını düzeltmek gibi). Önce kayit_bul ile doğru kaydın id\'sini bul. Sadece değişmesini istediğin alanları gönder.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'number', description: 'Güncellenecek gelir kaydının id numarası (kayit_bul ile bulunur)' },
+      aciklama: { type: 'string' },
+      tutar: { type: 'number' },
+      tarih: { type: 'string', description: 'YYYY-MM-DD' },
+      durum: { type: 'string', enum: ['ÖDENDİ', 'ÖDENMEDİ'] },
+      not_metni: { type: 'string' },
+    },
+    required: ['id'],
+  },
+};
+const CHAT_TOOL_DELETE_INCOME = {
+  name: 'gelir_sil',
+  description:
+    'Var olan bir gelir kaydını kalıcı olarak siler (ör. mükerrer/yanlış girilmiş bir kayıt). Önce kayit_bul ile doğru kaydın id\'sini bul; işlemden sonra kullanıcıya hangi kaydı sildiğini açıkça özetle.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: { type: 'number', description: 'Silinecek gelir kaydının id numarası' },
+    },
+    required: ['id'],
+  },
+};
+
+// Kontrattan (satılık/kiralık/malik/taşeron) otomatik oluşmuş, taksitli olmayan bir gelir/gider
+// kaydı "kilitli" sayılır — arayüzde de bu kayıtların silme butonu gösterilmez, çünkü kayıt bir
+// sonraki kontrat güncellemesinde/silinmesinde otomatik senkronlanır. Asistanın da bu kayıtları
+// doğrudan değiştirmesi/silmesi kontratla senkronu bozar; bu yüzden aynı kuralı burada da uyguluyoruz.
+const MUTATING_CHAT_TOOLS = new Set(['gider_ekle', 'gelir_ekle', 'gider_guncelle', 'gider_sil', 'gelir_guncelle', 'gelir_sil']);
+
+async function kontrataKilitliMi(table, id, isletme_id) {
+  const { rows } = await q(`select kontrat_id, taksit_id from ${table} where id = $1 and isletme_id = $2`, [id, isletme_id]);
+  const row = rows[0];
+  if (!row) return { exists: false, locked: false };
+  return { exists: true, locked: !!row.kontrat_id && !row.taksit_id };
+}
 
 async function runChatTool(name, input, isletme_id) {
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -950,6 +1038,80 @@ async function runChatTool(name, input, isletme_id) {
       [isletme_id, aciklama ?? null, tutar ?? null, tarih || todayISO, durum || 'ÖDENDİ', not_metni ?? null, proje_id ?? null]
     );
     return { ok: true, summary: `Gelir eklendi: ${aciklama || 'gelir'} — ${Number(tutar || 0).toLocaleString('tr-TR')} ₺ (kayıt no ${rows[0].id})` };
+  }
+  if (name === 'kayit_bul') {
+    const { tip, arama, tarih, tutar } = input || {};
+    const table = tip === 'gelir' ? 'gelirler' : 'expenses';
+    const searchCols = tip === 'gelir' ? ['aciklama', 'taraf'] : ['gider_turu', 'firma', 'taraf'];
+    const conditions = ['isletme_id = $1'];
+    const params = [isletme_id];
+    if (arama) {
+      const ors = searchCols.map((c) => { params.push('%' + arama + '%'); return `${c} ilike $${params.length}`; });
+      conditions.push('(' + ors.join(' or ') + ')');
+    }
+    if (tarih) { params.push(tarih); conditions.push(`tarih = $${params.length}`); }
+    if (tutar !== undefined && tutar !== null && tutar !== '') { params.push(tutar); conditions.push(`tutar = $${params.length}`); }
+    const selectCols = tip === 'gelir' ? 'aciklama, taraf' : 'gider_turu, firma, taraf';
+    const { rows } = await q(
+      `select id, ${selectCols}, tutar, tarih, durum, proje_id, kontrat_id, taksit_id
+       from ${table} where ${conditions.join(' and ')} order by tarih desc nulls last, id desc limit 20`,
+      params
+    );
+    if (!rows.length) return { ok: true, summary: 'Eşleşen kayıt bulunamadı. Arama kriterlerini gevşetmeyi dene (ör. sadece isim veya sadece tarih).' };
+    const list = rows.map((r) => {
+      const ad = tip === 'gelir' ? (r.aciklama || '—') : (r.gider_turu || '—');
+      const kimden = r.firma || r.taraf ? ` (${r.firma || r.taraf})` : '';
+      const kilit = (r.kontrat_id && !r.taksit_id) ? ' — [KONTRATA BAĞLI: bu kayıt bir kontrattan otomatik oluşmuş, güncellemek/silmek için ilgili Kontratı düzenlemek/silmek gerekir]' : '';
+      return `id ${r.id}: ${ad}${kimden} — ${Number(r.tutar || 0).toLocaleString('tr-TR')} ₺, ${r.tarih ? new Date(r.tarih).toLocaleDateString('tr-TR') : 'tarih yok'}, ${r.durum || '—'}${kilit}`;
+    }).join('\n');
+    return { ok: true, summary: `${rows.length} kayıt bulundu:\n${list}` };
+  }
+  if (name === 'gider_guncelle' || name === 'gider_sil' || name === 'gelir_guncelle' || name === 'gelir_sil') {
+    const isGider = name.startsWith('gider_');
+    const table = isGider ? 'expenses' : 'gelirler';
+    const { id } = input || {};
+    if (!id) return { ok: false, summary: 'Kayıt id\'si belirtilmedi. Önce kayit_bul ile doğru kaydı bul.' };
+    const durum = await kontrataKilitliMi(table, id, isletme_id);
+    if (!durum.exists) return { ok: false, summary: `id ${id} ile eşleşen bir ${isGider ? 'gider' : 'gelir'} kaydı bulunamadı (bu işletmeye ait olmayabilir).` };
+    if (durum.locked) return { ok: false, summary: 'Bu kayıt bir kontrattan otomatik oluşmuş ("kilitli"), asistan üzerinden değiştirilemez/silinemez. Kullanıcıya, ilgili Kontrat kaydını Kontratlar sekmesinden düzenlemesini/silmesini söyle.' };
+
+    if (name === 'gider_sil') {
+      const { rows } = await q(`delete from expenses where id = $1 and isletme_id = $2 returning gider_turu, firma, tutar, tarih`, [id, isletme_id]);
+      const r = rows[0];
+      return { ok: true, summary: r ? `Gider silindi: ${r.gider_turu || r.firma || 'kayıt'} — ${Number(r.tutar || 0).toLocaleString('tr-TR')} ₺ (${r.tarih ? new Date(r.tarih).toLocaleDateString('tr-TR') : 'tarihsiz'})` : `Kayıt (id ${id}) silindi.` };
+    }
+    if (name === 'gelir_sil') {
+      const { rows } = await q(`delete from gelirler where id = $1 and isletme_id = $2 returning aciklama, tutar, tarih`, [id, isletme_id]);
+      const r = rows[0];
+      return { ok: true, summary: r ? `Gelir silindi: ${r.aciklama || 'kayıt'} — ${Number(r.tutar || 0).toLocaleString('tr-TR')} ₺ (${r.tarih ? new Date(r.tarih).toLocaleDateString('tr-TR') : 'tarihsiz'})` : `Kayıt (id ${id}) silindi.` };
+    }
+    if (name === 'gider_guncelle') {
+      const { gider_turu, firma, tutar, tarih, ay, durum: yeniDurum, not_metni } = input || {};
+      const { rows } = await q(
+        `update expenses set
+           gider_turu = coalesce($3, gider_turu), firma = coalesce($4, firma), tutar = coalesce($5, tutar),
+           tarih = coalesce($6, tarih), ay = coalesce($7, ay), durum = coalesce($8, durum), not_metni = coalesce($9, not_metni)
+         where id = $1 and isletme_id = $2 returning *`,
+        [id, isletme_id, gider_turu ?? null, firma ?? null, tutar ?? null, tarih ?? null, ay ?? null, yeniDurum ?? null, not_metni ?? null]
+      );
+      const r = rows[0];
+      if (!r) return { ok: false, summary: 'Güncelleme başarısız oldu.' };
+      await syncMaintenanceFromExpense(r);
+      return { ok: true, summary: `Gider güncellendi (id ${id}): ${r.gider_turu || r.firma || 'kayıt'} — ${Number(r.tutar || 0).toLocaleString('tr-TR')} ₺, ${r.tarih ? new Date(r.tarih).toLocaleDateString('tr-TR') : 'tarihsiz'}, ${r.durum}` };
+    }
+    if (name === 'gelir_guncelle') {
+      const { aciklama, tutar, tarih, durum: yeniDurum, not_metni } = input || {};
+      const { rows } = await q(
+        `update gelirler set
+           aciklama = coalesce($3, aciklama), tutar = coalesce($4, tutar), tarih = coalesce($5, tarih),
+           durum = coalesce($6, durum), not_metni = coalesce($7, not_metni)
+         where id = $1 and isletme_id = $2 returning *`,
+        [id, isletme_id, aciklama ?? null, tutar ?? null, tarih ?? null, yeniDurum ?? null, not_metni ?? null]
+      );
+      const r = rows[0];
+      if (!r) return { ok: false, summary: 'Güncelleme başarısız oldu.' };
+      return { ok: true, summary: `Gelir güncellendi (id ${id}): ${r.aciklama || 'kayıt'} — ${Number(r.tutar || 0).toLocaleString('tr-TR')} ₺, ${r.tarih ? new Date(r.tarih).toLocaleDateString('tr-TR') : 'tarihsiz'}, ${r.durum}` };
+    }
   }
   return { ok: false, summary: 'Bilinmeyen işlem: ' + name };
 }
@@ -974,7 +1136,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     let tools = [];
 
     if (isSite) {
-      tools = [CHAT_TOOL_ADD_EXPENSE];
+      tools = [CHAT_TOOL_ADD_EXPENSE, CHAT_TOOL_FIND_RECORDS, CHAT_TOOL_UPDATE_EXPENSE, CHAT_TOOL_DELETE_EXPENSE];
       // Güncel duruma dair kısa bir özet çıkar, asistanın gerçek verilerden haberi olsun
       const [{ rows: apartments }, { rows: payments }, { rows: expenses }] = await Promise.all([
         q('select no from apartments where isletme_id = $1', [isletme_id]),
@@ -1009,9 +1171,9 @@ Bilmen gereken temel mevzuat noktaları (genel bilgi olarak kullan):
 
 Yöneticiye aidat, demirbaş, fatura/gider, personel takibi ve site muhasebesiyle ilgili sorularda yardımcı ol. Uygulamanın Özet sekmesindeki "Raporlar ve Belgeler" bölümünde Gelir-Gider Tablosu, İşletme Projesi Hesaplayıcı, Genel Kurul Özet Raporu ve Yasal Belgeler takip listesi olduğunu biliyorsun; ilgili sorularda oraya yönlendirebilirsin.
 
-Her zaman Türkçe, kısa ve net cevaplar ver. Kesin hukuki veya vergisel sonucu olan konularda (ceza, dava süreci, vergi mükellefiyeti gibi) genel bilgi verebilirsin ama bunun bağlayıcı hukuki/mali tavsiye olmadığını, kesinleşmesi gereken konularda bir mali müşavir veya avukata danışılmasını belirt. Aşağıda uygulamanın güncel veri özeti var, sorular buna göre yanıtlanabilir; ama tam liste/detay gerekiyorsa yöneticiye uygulama içindeki ilgili sekmeye bakmasını söyle (elinde satır satır veri yok, sadece bu özet var).\n\nÖNEMLİ: Yönetici sana "şu kadar TL elektrik gideri ekle", "500 TL fatura ödedim, kaydet" gibi bir gider/fatura eklemeni söylerse, ona nasıl ekleyeceğini anlatmak yerine "gider_ekle" aracını kullanarak kaydı SEN DOĞRUDAN EKLE. Tutar ve tür gibi temel bilgiler yeterli, eksik detay (firma, tarih vb.) için illa soru sorman gerekmez, makul varsayımlarla ekleyip sonucu özetle.\n\nGÜNCEL DURUM:\n${context}`;
+Her zaman Türkçe, kısa ve net cevaplar ver. Kesin hukuki veya vergisel sonucu olan konularda (ceza, dava süreci, vergi mükellefiyeti gibi) genel bilgi verebilirsin ama bunun bağlayıcı hukuki/mali tavsiye olmadığını, kesinleşmesi gereken konularda bir mali müşavir veya avukata danışılmasını belirt. Aşağıda uygulamanın güncel veri özeti var, sorular buna göre yanıtlanabilir; ama tam liste/detay gerekiyorsa yöneticiye uygulama içindeki ilgili sekmeye bakmasını söyle (elinde satır satır veri yok, sadece bu özet var).\n\nÖNEMLİ: Yönetici sana "şu kadar TL elektrik gideri ekle", "500 TL fatura ödedim, kaydet" gibi bir gider/fatura eklemeni söylerse, ona nasıl ekleyeceğini anlatmak yerine "gider_ekle" aracını kullanarak kaydı SEN DOĞRUDAN EKLE. Tutar ve tür gibi temel bilgiler yeterli, eksik detay (firma, tarih vb.) için illa soru sorman gerekmez, makul varsayımlarla ekleyip sonucu özetle.\n\nÖNEMLİ (var olan kayıtları düzeltme/silme): Yönetici "şu kayıt yanlış girilmiş", "durumunu ÖDENMEDİ yap", "bu kaydı sil" gibi mevcut bir kaydı değiştirmeni/silmeni istediğinde, ÖNCE "kayit_bul" aracıyla doğru kaydı (ve id'sini) bul. Tek ve net bir eşleşme varsa "gider_guncelle" veya "gider_sil" aracıyla işlemi SEN DOĞRUDAN YAP (izin sormana gerek yok, işlem yapıldıktan sonra ne yaptığını açıkça özetle ki yönetici kontrol edebilsin). Birden fazla aday kayıt varsa ve hangisi olduğundan emin değilsen, işlemi yapmadan önce yöneticiye hangisini kastettiğini sor. Bir kayıt "KONTRATA BAĞLI" olarak işaretliyse asistan üzerinden değiştirilemez/silinemez; yöneticiye ilgili Kontrat kaydını Kontratlar sekmesinden düzenlemesini/silmesini söyle.\n\nGÜNCEL DURUM:\n${context}`;
     } else {
-      tools = [CHAT_TOOL_ADD_EXPENSE, CHAT_TOOL_ADD_INCOME];
+      tools = [CHAT_TOOL_ADD_EXPENSE, CHAT_TOOL_ADD_INCOME, CHAT_TOOL_FIND_RECORDS, CHAT_TOOL_UPDATE_EXPENSE, CHAT_TOOL_DELETE_EXPENSE, CHAT_TOOL_UPDATE_INCOME, CHAT_TOOL_DELETE_INCOME];
       const [{ rows: gelirler }, { rows: expenses }, { rows: contracts }, { rows: projeler }] = await Promise.all([
         q('select * from gelirler where isletme_id = $1', [isletme_id]),
         q('select * from expenses where isletme_id = $1', [isletme_id]),
@@ -1038,7 +1200,7 @@ Toplam kontrat sayısı: ${(contracts || []).length} (Satılık: ${satilikSayisi
 ${projeler && projeler.length ? `\nProjeler (id numaralarıyla birlikte):\n${projeSatirlari}` : ''}
 `.trim();
 
-      system = `Sen "${isletmeAdi}" işletmesinin (ofis, inşaat veya gayrimenkul projesi olabilir) muhasebe ve iş takibi asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi, satılık/kiralık kontrat durumu hakkında sorulara yardımcı ol. Uygulamada "Kontratlar" sekmesinde satılık/kiralık mülk kontratlarının (karşı taraf, tutar, tarih, durum, belge) tutulduğunu, "Projeler" sekmesinde ise şirketin birden fazla inşaat/mimarlık projesinin her birinin kendi gelir-gider-kontrat kayıtlarıyla ayrı takip edildiğini, projeye bağlanmayan kayıtların "Ofis Geneli" sayıldığını biliyorsun; ilgili sorularda oraya yönlendirebilirsin. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nÖNEMLİ: Yönetici sana bir gider/fatura ("500 TL elektrik gideri ekle") veya bir gelir/tahsilat ("10.000 TL kira geliri geldi, kaydet") eklemeni söylerse, nasıl ekleyeceğini anlatmak yerine ilgili aracı ("gider_ekle" veya "gelir_ekle") kullanarak kaydı SEN DOĞRUDAN EKLE. Kullanıcı bir proje/inşaat adı söylerse (örn. "Bahçelievler projesine ekle"), yukarıdaki proje listesinden doğru proje id'sini bul ve kullan; proje belirtmezse proje_id'yi boş bırak (Ofis Geneli sayılır). Eksik detaylar için illa soru sormana gerek yok, makul varsayımlarla (tarih belirtilmemişse bugün, durum belirtilmemişse gidercte ÖDENMEDİ / gelirde ÖDENDİ) ekleyip sonucu kısaca özetle.\n\nGÜNCEL DURUM:\n${context}`;
+      system = `Sen "${isletmeAdi}" işletmesinin (ofis, inşaat veya gayrimenkul projesi olabilir) muhasebe ve iş takibi asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi, satılık/kiralık kontrat durumu hakkında sorulara yardımcı ol. Uygulamada "Kontratlar" sekmesinde satılık/kiralık mülk kontratlarının (karşı taraf, tutar, tarih, durum, belge) tutulduğunu, "Projeler" sekmesinde ise şirketin birden fazla inşaat/mimarlık projesinin her birinin kendi gelir-gider-kontrat kayıtlarıyla ayrı takip edildiğini, projeye bağlanmayan kayıtların "Ofis Geneli" sayıldığını biliyorsun; ilgili sorularda oraya yönlendirebilirsin. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nÖNEMLİ: Yönetici sana bir gider/fatura ("500 TL elektrik gideri ekle") veya bir gelir/tahsilat ("10.000 TL kira geliri geldi, kaydet") eklemeni söylerse, nasıl ekleyeceğini anlatmak yerine ilgili aracı ("gider_ekle" veya "gelir_ekle") kullanarak kaydı SEN DOĞRUDAN EKLE. Kullanıcı bir proje/inşaat adı söylerse (örn. "Bahçelievler projesine ekle"), yukarıdaki proje listesinden doğru proje id'sini bul ve kullan; proje belirtmezse proje_id'yi boş bırak (Ofis Geneli sayılır). Eksik detaylar için illa soru sormana gerek yok, makul varsayımlarla (tarih belirtilmemişse bugün, durum belirtilmemişse gidercte ÖDENMEDİ / gelirde ÖDENDİ) ekleyip sonucu kısaca özetle.\n\nÖNEMLİ (var olan kayıtları düzeltme/silme): Yönetici "şu kayıt yanlış girilmiş", "durumunu ÖDENMEDİ yap", "bu kaydı sil", "mükerrer girilmiş, birini sil" gibi mevcut bir gelir/gider kaydını değiştirmeni/silmeni istediğinde, ÖNCE "kayit_bul" aracıyla doğru kaydı (ve id'sini) bul. Tek ve net bir eşleşme varsa "gider_guncelle"/"gider_sil"/"gelir_guncelle"/"gelir_sil" araçlarından uygun olanıyla işlemi SEN DOĞRUDAN YAP (izin sormana gerek yok, işlem yapıldıktan sonra ne yaptığını açıkça özetle ki yönetici kontrol edebilsin). Birden fazla aday kayıt varsa (ör. aynı isimde, yakın tarihli birkaç kayıt) ve hangisi olduğundan emin değilsen, işlemi yapmadan önce yöneticiye adayları göster ve hangisini kastettiğini sor — asla tahminle yanlış kaydı değiştirme/silme. Bir kayıt "KONTRATA BAĞLI" olarak işaretliyse asistan üzerinden değiştirilemez/silinemez; yöneticiye ilgili Kontrat kaydını Kontratlar sekmesinden düzenlemesini/silmesini söyle.\n\nGÜNCEL DURUM:\n${context}`;
     }
 
     let messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: message }];
@@ -1066,7 +1228,7 @@ ${projeler && projeler.length ? `\nProjeler (id numaralarıyla birlikte):\n${pro
         let resultText;
         try {
           const result = await runChatTool(tu.name, tu.input, isletme_id);
-          if (result.ok) changed = true;
+          if (result.ok && MUTATING_CHAT_TOOLS.has(tu.name)) changed = true;
           resultText = result.summary;
         } catch (err) {
           resultText = 'Hata: ' + err.message;
