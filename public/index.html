@@ -748,7 +748,7 @@ function tabsFor(){
   }
   return [
     {id:'ozet', label:'Özet', icon:'home'},
-    {id:'projeler', label:'Projeler', icon:'proje'},
+    {id:'projeler', label:'İnşaat', icon:'proje'},
     {id:'gelir', label:'Gelir', icon:'box'},
     {id:'kontratlar', label:'Kontratlar', icon:'contract'},
     {id:'asistan', label:'Asistan', icon:'chat'},
@@ -759,7 +759,7 @@ function tabsFor(){
 
 const ADD_BTN_LABEL = {
   daireler: 'Yeni Ay Ekle',
-  projeler: 'Yeni Proje',
+  projeler: 'Yeni İnşaat',
   gelir: 'Yeni Gelir',
   kontratlar: 'Yeni Kontrat',
   giderler: 'Yeni Gider',
@@ -991,7 +991,7 @@ function projeChip(projeId){
 // Kayıt ekleme/düzenleme formlarında ortak "Hangi projeye ait?" seçim kutusu.
 function projeSelectHtml(selectedId){
   const opts = STATE.projeler.map(p=>`<option value="${p.id}" ${selectedId===p.id?'selected':''}>${esc(p.ad)}</option>`).join('');
-  return `<option value="" ${!selectedId?'selected':''}>— Ofis Geneli (projeye özel değil) —</option>${opts}`;
+  return `<option value="" ${!selectedId?'selected':''}>— Ofis Geneli (inşaata özel değil) —</option>${opts}`;
 }
 
 /* ---------------------------- ÖZET TAB ---------------------------- */
@@ -1125,7 +1125,7 @@ function renderOzetGenel(){
     <p style="font-size:11px;color:var(--ink-dim);margin:-6px 0 0;">"Ödendi" işaretli tüm gelir/gider kayıtlarının Ödeme Şekli alanına göre hesaplanır. Bir kayıtta ödeme şekli seçilmemişse "Belirtilmemiş" grubunda görünür.</p>
 
     ${STATE.projeler.length ? `
-    <div class="section-title">Projeler</div>
+    <div class="section-title">İnşaat Dosyaları</div>
     <div class="row-list">
       ${STATE.projeler.slice(0,5).map(p=>{
         const oz = projeOzetSayilari(p.id);
@@ -1141,6 +1141,16 @@ function renderOzetGenel(){
       }).join('')}
     </div>
     ` : ''}
+
+    <div class="section-title">Genel Muhasebe</div>
+    <div class="apt-row" id="openOfisGeneliBtn">
+      <div class="report-icon">${ICON.reportIcon}</div>
+      <div class="apt-info">
+        <div class="name">Ofis Geneli</div>
+        <div class="kat">Belirli bir inşaat dosyasına bağlı olmayan gelir, gider ve kontratlar</div>
+      </div>
+      ${ICON.chevron}
+    </div>
 
     ${(bekleyenGelir.length || bekleyenGider.length) ? `
     <div class="section-title">Dikkat Gerekenler</div>
@@ -1311,7 +1321,7 @@ function giderAltGrupHtml(baslik, rows){
     <div class="table-scroll">
       <table class="table-pro">
         <thead><tr>
-          <th>Gider Türü</th><th>Firma</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th>
+          <th>Gider Türü</th><th>Firma</th>${STATE.projeler.length?'<th>İnşaat</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th>
         </tr></thead>
         <tbody>
           ${rows.map(e=>`
@@ -1384,7 +1394,7 @@ function renderGelir(){
         </summary>
         <div class="table-scroll">
           <table class="table-pro">
-            <thead><tr><th>Açıklama</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+            <thead><tr><th>Açıklama</th>${STATE.projeler.length?'<th>İnşaat</th>':''}<th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
             <tbody>
               ${rows.map(g=>`
                 <tr data-open-gelir="${g.id}">
@@ -1417,7 +1427,7 @@ function openGelirSheet(id, presetProjeId){
     ${kilitli ? `<p style="font-size:11.5px;color:var(--ink-dim);margin:-8px 0 14px;line-height:1.5;background:var(--surface-2);padding:10px 12px;border-radius:9px;">Bu gelir bir kontrattan otomatik oluşturuldu. Açıklama/tarih/durumunu değiştirmek için Kontratlar sekmesinden ilgili kontratı düzenle. Ortak payı veya indirim yüzünden eline geçen net tutar sözleşmedekinden farklıysa, aşağıdaki tutarı değiştirebilirsin.</p>` : ''}
     ${taksitli ? `<p style="font-size:11.5px;color:var(--ink-dim);margin:-8px 0 14px;line-height:1.5;background:var(--surface-2);padding:10px 12px;border-radius:9px;">Bu, taksitli bir kontratın <b>${taksit?.taksit_no||''}. taksidi</b> (vade: ${taksit?.vade_tarihi?new Date(taksit.vade_tarihi).toLocaleDateString('tr-TR'):'—'}). Taksit tutarını değiştirmek için Kontratlar'dan taksit planını düzenle; bu taksidin alınıp alınmadığını ve tarihini burada işaretleyebilirsin.</p>` : ''}
     <div class="field"><label>Açıklama</label><input id="g_aciklama" value="${esc(g?.aciklama||'')}" placeholder="örn. Ortak ödemesi, 3 nolu daire satışı, ofis kirası..." ${alanKilitli?'disabled':''} /></div>
-    ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="g_proje" ${alanKilitli?'disabled':''}>${projeSelectHtml(g?g.proje_id:presetProjeId)}</select></div>` : ''}
+    ${STATE.projeler.length ? `<div class="field"><label>Hangi İnşaata Ait?</label><select id="g_proje" ${alanKilitli?'disabled':''}>${projeSelectHtml(g?g.proje_id:presetProjeId)}</select></div>` : ''}
     <div class="field"><label>Kişi / Taraf</label><input id="g_taraf" list="taraf_list" value="${esc(g?.taraf||'')}" placeholder="örn. Ahmet Yılmaz (malik), Mehmet Ortak..." ${alanKilitli?'disabled':''} /><datalist id="taraf_list">${tarafListesi().map(t=>`<option value="${esc(t)}"></option>`).join('')}</datalist></div>
     <div class="field"><label>${(kilitli||taksitli)?'Net Alınan Tutar (₺)':'Tutar (₺)'}</label><input id="g_tutar" type="text" inputmode="decimal" value="${g?.tutar??''}" /></div>
     <div class="field"><label>Tarih</label><input id="g_tarih" type="date" value="${g?.tarih||''}" ${kilitli?'disabled':''} /></div>
@@ -1529,7 +1539,7 @@ function renderKontratlar(){
       <div class="table-scroll">
         <table class="table-pro">
           <thead><tr>
-            <th>Mülk</th>${STATE.projeler.length?'<th>Proje</th>':''}<th>Tip</th><th>Karşı Taraf</th><th>Başlangıç</th><th>Bitiş</th><th class="num">Tutar</th><th>Durum</th><th>Belge</th>
+            <th>Mülk</th>${STATE.projeler.length?'<th>İnşaat</th>':''}<th>Tip</th><th>Karşı Taraf</th><th>Başlangıç</th><th>Bitiş</th><th class="num">Tutar</th><th>Durum</th><th>Belge</th>
           </tr></thead>
           <tbody>
             ${STATE.contracts.map(k=>{
@@ -1575,7 +1585,7 @@ function openContractSheet(id, presetProjeId){
       <button class="close" data-close-sheet>${ICON.x}</button>
     </div>
     <div class="field"><label>Mülk Adı / Adresi</label><input id="k_mulk" value="${esc(k?.mulk_adi||'')}" placeholder="örn. Bahçelievler 3. Cadde No:12 Daire 4" /></div>
-    ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="k_proje">${projeSelectHtml(k?k.proje_id:presetProjeId)}</select></div>` : ''}
+    ${STATE.projeler.length ? `<div class="field"><label>Hangi İnşaata Ait?</label><select id="k_proje">${projeSelectHtml(k?k.proje_id:presetProjeId)}</select></div>` : ''}
     <div class="field"><label>Tip</label>
       <div class="seg" data-role="tipSeg" style="flex-wrap:wrap;">
         <button type="button" data-tip="satilik" class="${(!k||k?.tip==='satilik')?'on odendi':''}">Satılık</button>
@@ -1814,33 +1824,19 @@ function renderProjeler(){
 }
 
 function renderProjelerListesi(){
-  const genelOzet = projeOzetSayilari('genel');
   const rows = STATE.projeler.map(p=>({p, ozet:projeOzetSayilari(p.id)}));
-  const toplamGelir = genelOzet.gelir + rows.reduce((s,r)=>s+r.ozet.gelir,0);
-  const toplamGider = genelOzet.gider + rows.reduce((s,r)=>s+r.ozet.gider,0);
+  const toplamGelir = rows.reduce((s,r)=>s+r.ozet.gelir,0);
+  const toplamGider = rows.reduce((s,r)=>s+r.ozet.gider,0);
   return `
     <div class="kpis">
-      <div class="kpi"><div class="lbl">Toplam Proje</div><div class="val">${STATE.projeler.length}</div></div>
-      <div class="kpi good"><div class="lbl">Aktif Proje</div><div class="val">${STATE.projeler.filter(p=>p.durum==='aktif').length}</div></div>
-      <div class="kpi ${(toplamGelir-toplamGider)>=0?'good':'bad'}"><div class="lbl">Şirket Toplam Net</div><div class="val">${tl(toplamGelir-toplamGider)}</div></div>
+      <div class="kpi"><div class="lbl">Toplam İnşaat</div><div class="val">${STATE.projeler.length}</div></div>
+      <div class="kpi good"><div class="lbl">Aktif İnşaat</div><div class="val">${STATE.projeler.filter(p=>p.durum==='aktif').length}</div></div>
+      <div class="kpi ${(toplamGelir-toplamGider)>=0?'good':'bad'}"><div class="lbl">İnşaat Toplam Net</div><div class="val">${tl(toplamGelir-toplamGider)}</div></div>
     </div>
+    <p style="font-size:11px;color:var(--ink-dim);margin:-6px 0 14px;">Bu sayfada sadece inşaat dosyaları listelenir; ofis geneline ait kayıtlar için Özet sayfasındaki "Ofis Geneli" bağlantısını kullanın.</p>
 
-    <div class="section-title">Ofis Geneli</div>
-    <div class="apt-row" data-open-proje="genel">
-      <div class="apt-no" style="border-radius:11px;">${ICON.reportIcon}</div>
-      <div class="apt-info">
-        <div class="name">Ofis Geneli</div>
-        <div class="kat">Belirli bir projeye bağlı olmayan gelir, gider ve kontratlar</div>
-      </div>
-      <div class="apt-amount" style="text-align:right;">
-        <div style="font-weight:700;color:${genelOzet.net>=0?'var(--success)':'var(--danger)'};">${tl(genelOzet.net)}</div>
-        <div style="font-size:10.5px;">net</div>
-      </div>
-      ${ICON.chevron}
-    </div>
-
-    <div class="section-title">Projeler</div>
-    ${!STATE.projeler.length ? `<div class="empty">${ICON.proje}<div><b>Henüz proje eklenmedi</b><br>Üstteki "Yeni Proje" ile ilk inşaat/mimarlık projenizi ekleyin.</div></div>` : `
+    <div class="section-title">İnşaat Dosyaları</div>
+    ${!STATE.projeler.length ? `<div class="empty">${ICON.proje}<div><b>Henüz inşaat dosyası eklenmedi</b><br>Üstteki "Yeni İnşaat" ile ilk inşaat dosyanızı ekleyin.</div></div>` : `
     <div class="row-list">
       ${rows.map(({p,ozet})=>`
         <div class="apt-row" data-open-proje="${p.id}">
@@ -1868,7 +1864,7 @@ function renderProjeDetay(pid){
   const baslik = isGenel ? 'Ofis Geneli' : proje.ad;
 
   return `
-    <button class="btn-toolbar" id="projeBackBtn" type="button" style="margin-bottom:14px;">${ICON.chevronLeft} Tüm Projeler</button>
+    <button class="btn-toolbar" id="projeBackBtn" type="button" style="margin-bottom:14px;">${ICON.chevronLeft} ${isGenel ? 'Özet' : 'Tüm İnşaatlar'}</button>
 
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
       <div>
@@ -1928,10 +1924,10 @@ function openProjeSheet(id){
   const p = (id && id!=='genel') ? STATE.projeler.find(x=>x.id===id) : null;
   const html = `
     <div class="sheet-head">
-      <h2>${p?'Projeyi Düzenle':'Yeni Proje'}</h2>
+      <h2>${p?'İnşaatı Düzenle':'Yeni İnşaat'}</h2>
       <button class="close" data-close-sheet>${ICON.x}</button>
     </div>
-    <div class="field"><label>Proje Adı</label><input id="pr_ad" value="${esc(p?.ad||'')}" placeholder="örn. Bahçelievler Sitesi, Marmaris Villaları" /></div>
+    <div class="field"><label>İnşaat Adı</label><input id="pr_ad" value="${esc(p?.ad||'')}" placeholder="örn. Bahçelievler Sitesi, Marmaris Villaları" /></div>
     <div class="field"><label>Açıklama (varsa)</label><textarea id="pr_aciklama">${esc(p?.aciklama||'')}</textarea></div>
     <div class="field"><label>Durum</label>
       <div class="seg">
@@ -1957,7 +1953,7 @@ function openProjeSheet(id){
   });
   document.getElementById('saveProjeBtn').onclick = async ()=>{
     const ad = document.getElementById('pr_ad').value.trim();
-    if(!ad){ showToast('Proje adı gerekli'); return; }
+    if(!ad){ showToast('İnşaat adı gerekli'); return; }
     const payload = { isletme_id: STATE.currentIsletmeId, ad, aciklama: document.getElementById('pr_aciklama').value || null, durum };
     try{
       const data = p
@@ -2112,7 +2108,7 @@ function renderPersonel(){
       <div class="table-card-head"><h2>Personel Listesi</h2></div>
       <div class="table-scroll">
         <table class="table-pro">
-          <thead><tr><th>İsim</th><th>Görev</th>${STATE.projeler.length?'<th>Proje</th>':''}<th class="num">Aylık Ücret</th><th>Belge</th><th>${STATE.currentMonth? monthLabel(STATE.currentMonth)+' Durumu' : 'Bu Ay'}</th></tr></thead>
+          <thead><tr><th>İsim</th><th>Görev</th>${STATE.projeler.length?'<th>İnşaat</th>':''}<th class="num">Aylık Ücret</th><th>Belge</th><th>${STATE.currentMonth? monthLabel(STATE.currentMonth)+' Durumu' : 'Bu Ay'}</th></tr></thead>
           <tbody>
             ${STATE.staff.map(p=>{
               const thisMonthPay = STATE.currentMonth ? STATE.staffPayments.find(sp=>sp.staff_id===p.id && sp.ay===STATE.currentMonth) : null;
@@ -2239,7 +2235,11 @@ function wireMain(){
     };
   });
   const projeBackBtn = document.getElementById('projeBackBtn');
-  if(projeBackBtn) projeBackBtn.onclick = ()=>{ STATE.projeView = null; renderMain(); };
+  if(projeBackBtn) projeBackBtn.onclick = ()=>{
+    const geldigiGenel = STATE.projeView==='genel';
+    STATE.projeView = null;
+    if(geldigiGenel){ STATE.tab = 'ozet'; render(); } else { renderMain(); }
+  };
   const projeEditBtn = document.getElementById('projeEditBtn');
   if(projeEditBtn) projeEditBtn.onclick = ()=> openProjeSheet(STATE.projeView);
   const addProjeGelirBtn = document.querySelector('[data-add-proje-gelir]');
@@ -2260,6 +2260,8 @@ function wireMain(){
   if(projeYevmiyeBtn) projeYevmiyeBtn.onclick = ()=> openProjeYevmiyeSheet(STATE.projeView);
   const reportsBtn = document.getElementById('openReportsBtn');
   if(reportsBtn) reportsBtn.onclick = openReportsHub;
+  const ofisGeneliBtn = document.getElementById('openOfisGeneliBtn');
+  if(ofisGeneliBtn) ofisGeneliBtn.onclick = ()=>{ STATE.tab = 'projeler'; STATE.projeView = 'genel'; render(); };
   const aidatBtn = document.getElementById('openAidatTutariBtn');
   if(aidatBtn) aidatBtn.onclick = openAidatTutariSheet;
 }
@@ -2817,7 +2819,7 @@ function openExpenseSheet(id, presetProjeId){
       </div>
       <div style="font-size:11px;color:var(--ink-dim);margin-top:6px;">Elektrik, İSKİ, internet, kira, muhasebe, maaş gibi düzenli ödemeler "Sabit Gider"; kırtasiye, mutfak, temizlik gibi tekil harcamalar "Extra Harcama".</div>
     </div>
-    ${STATE.projeler.length ? `<div class="field"><label>Hangi Projeye Ait?</label><select id="f_proje" ${alanKilitli?'disabled':''}>${projeSelectHtml(e?e.proje_id:presetProjeId)}</select></div>` : ''}
+    ${STATE.projeler.length ? `<div class="field"><label>Hangi İnşaata Ait?</label><select id="f_proje" ${alanKilitli?'disabled':''}>${projeSelectHtml(e?e.proje_id:presetProjeId)}</select></div>` : ''}
     <div class="field">
       <label>Firma / Abone</label>
       <select id="f_firma_select" ${alanKilitli?'disabled':''}>
@@ -3065,7 +3067,7 @@ function openStaffSheet(id, presetProjeId){
     </div>
     <div class="field"><label>İsim</label><input id="s_isim" value="${esc(p?.isim||'')}" placeholder="örn. Ahmet Yılmaz" /></div>
     <div class="field"><label>Görev</label><input id="s_gorev" value="${esc(p?.gorev||'')}" placeholder="örn. Gece Güvenlik, Demirci, Sıvacı..." /></div>
-    ${STATE.projeler.length ? `<div class="field"><label>Hangi Projede Çalışıyor? (varsa)</label><select id="s_proje">${projeSelectHtml(p?p.proje_id:presetProjeId)}</select></div>` : ''}
+    ${STATE.projeler.length ? `<div class="field"><label>Hangi İnşaatta Çalışıyor? (varsa)</label><select id="s_proje">${projeSelectHtml(p?p.proje_id:presetProjeId)}</select></div>` : ''}
     <div class="field"><label>Aylık Ücret (₺)</label><input id="s_ucret" type="text" inputmode="decimal" value="${p?.aylik_ucret??''}" /></div>
     <div class="field">
       <label>SGK Belgesi (hizmet dökümü, tahakkuk fişi vb.)</label>
