@@ -1855,6 +1855,96 @@ function renderProjelerListesi(){
   `;
 }
 
+// İnşaat/Ofis Geneli detay sayfasında Gelirler ve Giderler listelerini, Gelir/Giderler
+// sekmelerindeki gibi aya göre gruplanmış, açılır/kapanır kutular halinde gösterir.
+function projeGelirGruplu(rows){
+  if(!rows.length) return `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>`;
+  const groups = {};
+  rows.forEach(g=>{
+    const key = g.tarih ? g.tarih.slice(0,7) : '__none__';
+    (groups[key] = groups[key] || []).push(g);
+  });
+  const groupKeys = Object.keys(groups).sort((a,b)=>{
+    if(a==='__none__') return 1;
+    if(b==='__none__') return -1;
+    return b.localeCompare(a); // en yeni ay en üstte
+  });
+  return `<div style="margin-bottom:8px;">${groupKeys.map((key,idx)=>{
+    const grupRows = groups[key];
+    const grupToplam = grupRows.filter(g=>g.durum==='ÖDENDİ').reduce((s,g)=>s+(Number(g.tutar)||0),0);
+    const label = key==='__none__' ? 'Tarih Belirtilmemiş' : monthLabel(key);
+    return `
+    <details class="table-card ay-group" style="margin-bottom:8px;" ${idx===0?'open':''}>
+      <summary class="table-card-head">
+        <h2>${esc(label)}</h2>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <span style="font-size:11.5px;color:var(--ink-dim);">${grupRows.length} kayıt</span>
+          <span class="mono" style="font-weight:700;">${tl(grupToplam)}</span>
+          <span class="ay-group-chevron">${ICON.chevron}</span>
+        </div>
+      </summary>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr><th>Açıklama</th><th>Kişi/Taraf</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+          <tbody>
+            ${grupRows.map(g=>`
+              <tr data-open-gelir="${g.id}">
+                <td class="name-cell">${esc(g.aciklama||'—')}${g.kontrat_id?` <span class="chip" style="background:var(--brand-soft);color:var(--brand);">Kontrat</span>`:''}</td>
+                <td>${esc(g.taraf||'—')}</td>
+                <td>${g.tarih? new Date(g.tarih).toLocaleDateString('tr-TR'):'—'}</td>
+                <td class="num">${tl(g.tutar)}</td>
+                <td>${statusChip(g.durum)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>`;
+  }).join('')}</div>`;
+}
+
+function projeGiderGruplu(rows){
+  if(!rows.length) return `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>`;
+  const groups = {};
+  rows.forEach(e=>{
+    const key = e.ay || 'Ay Belirtilmemiş';
+    (groups[key] = groups[key] || []).push(e);
+  });
+  const groupKeys = Object.keys(groups).sort((a,b)=>{
+    const maxTime = (list)=> Math.max(0, ...list.map(e=> e.tarih ? new Date(e.tarih).getTime() : 0));
+    return maxTime(groups[b]) - maxTime(groups[a]);
+  });
+  return `<div style="margin-bottom:8px;">${groupKeys.map((key,idx)=>{
+    const grupRows = groups[key];
+    const grupToplam = grupRows.filter(e=>e.durum==='ÖDENDİ').reduce((s,e)=>s+(Number(e.tutar)||0),0);
+    return `
+    <details class="table-card ay-group" style="margin-bottom:8px;" ${idx===0?'open':''}>
+      <summary class="table-card-head">
+        <h2>${esc(key)}</h2>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <span style="font-size:11.5px;color:var(--ink-dim);">${grupRows.length} kayıt</span>
+          <span class="mono" style="font-weight:700;">${tl(grupToplam)}</span>
+          <span class="ay-group-chevron">${ICON.chevron}</span>
+        </div>
+      </summary>
+      <div class="table-scroll">
+        <table class="table-pro">
+          <thead><tr><th>Gider Türü</th><th>Firma / Kişi</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
+          <tbody>
+            ${grupRows.map(e=>`
+              <tr data-open-exp="${e.id}">
+                <td class="name-cell">${esc(e.gider_turu||'—')}${e.kontrat_id?` <span class="chip" style="background:var(--brand-soft);color:var(--brand);">Kontrat</span>`:''}</td>
+                <td>${esc(e.firma||e.taraf||'—')}</td>
+                <td>${e.tarih? new Date(e.tarih).toLocaleDateString('tr-TR'):'—'}</td>
+                <td class="num">${tl(e.tutar)}</td>
+                <td>${statusChip(e.durum)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>`;
+  }).join('')}</div>`;
+}
+
 function renderProjeDetay(pid){
   const isGenel = pid==='genel';
   const proje = isGenel ? null : STATE.projeler.find(p=>p.id===pid);
@@ -1883,22 +1973,10 @@ function renderProjeDetay(pid){
     </div>
 
     <div class="section-title">Gelirler<button class="btn-toolbar" data-add-proje-gelir type="button" style="margin-left:auto;">${ICON.plus} Gelir Ekle</button></div>
-    ${!gelirler.length ? `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>` : `
-    <div class="table-card" style="margin-bottom:8px;">
-      <div class="table-scroll"><table class="table-pro">
-        <thead><tr><th>Açıklama</th><th>Kişi/Taraf</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
-        <tbody>${gelirler.map(g=>`<tr data-open-gelir="${g.id}"><td class="name-cell">${esc(g.aciklama||'—')}${g.kontrat_id?` <span class="chip" style="background:var(--brand-soft);color:var(--brand);">Kontrat</span>`:''}</td><td>${esc(g.taraf||'—')}</td><td>${g.tarih?new Date(g.tarih).toLocaleDateString('tr-TR'):'—'}</td><td class="num">${tl(g.tutar)}</td><td>${statusChip(g.durum)}</td></tr>`).join('')}</tbody>
-      </table></div>
-    </div>`}
+    ${projeGelirGruplu(gelirler)}
 
     <div class="section-title">Giderler<button class="btn-toolbar" data-add-proje-gider type="button" style="margin-left:auto;">${ICON.plus} Gider Ekle</button></div>
-    ${!expenses.length ? `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>` : `
-    <div class="table-card" style="margin-bottom:8px;">
-      <div class="table-scroll"><table class="table-pro">
-        <thead><tr><th>Gider Türü</th><th>Firma / Kişi</th><th>Tarih</th><th class="num">Tutar</th><th>Durum</th></tr></thead>
-        <tbody>${expenses.map(e=>`<tr data-open-exp="${e.id}"><td class="name-cell">${esc(e.gider_turu||'—')}${e.kontrat_id?` <span class="chip" style="background:var(--brand-soft);color:var(--brand);">Kontrat</span>`:''}</td><td>${esc(e.firma||e.taraf||'—')}</td><td>${e.tarih?new Date(e.tarih).toLocaleDateString('tr-TR'):'—'}</td><td class="num">${tl(e.tutar)}</td><td>${statusChip(e.durum)}</td></tr>`).join('')}</tbody>
-      </table></div>
-    </div>`}
+    ${projeGiderGruplu(expenses)}
 
     <div class="section-title">Kontratlar<button class="btn-toolbar" data-add-proje-kontrat type="button" style="margin-left:auto;">${ICON.plus} Kontrat Ekle</button></div>
     ${!contracts.length ? `<p style="color:var(--ink-dim);font-size:13px;">Kayıt yok.</p>` : `
