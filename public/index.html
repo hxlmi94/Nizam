@@ -2810,7 +2810,7 @@ function openExpenseSheet(id, presetProjeId){
     <div class="field">
       <label>Gider Türü</label>
       <input id="f_tur" value="${esc(e?.gider_turu||'')}" placeholder="örn. Elektrik ve Enerji" ${alanKilitli?'disabled':''} />
-      ${STATE.projeler.length ? `<div class="chip-row" id="f_tur_presets" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">${INSAAT_GIDER_KALEMLERI.map(k=>`<button type="button" class="chip-pick" data-tur="${esc(k)}" style="border:1px solid var(--line);background:var(--surface-2);color:var(--ink-dim);border-radius:20px;padding:5px 11px;font-size:11.5px;cursor:pointer;">${esc(k)}</button>`).join('')}</div>` : ''}
+      ${STATE.projeler.length ? `<select id="f_tur_presets" ${alanKilitli?'disabled':''} style="margin-top:8px;"><option value="">— Hazır listeden seç (opsiyonel) —</option>${INSAAT_GIDER_KALEMLERI.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('')}</select>` : ''}
     </div>
     <div class="field"><label>Kategori</label>
       <div class="seg" data-role="kategoriSeg">
@@ -2900,16 +2900,16 @@ function openExpenseSheet(id, presetProjeId){
   const turInput = document.getElementById('f_tur');
   const turPresets = document.getElementById('f_tur_presets');
   if(turPresets && !kilitli){
-    turPresets.querySelectorAll('[data-tur]').forEach(chip=>{
-      chip.onclick = ()=>{
-        turInput.value = chip.dataset.tur;
-        const yeniKategori = guessExpenseKategoriClient(chip.dataset.tur, null);
-        kategori = yeniKategori;
-        kategoriSeg.querySelectorAll('button').forEach(x=>{
-          x.className = x.dataset.k===yeniKategori ? ('on '+(yeniKategori==='sabit'?'odendi':'kismi')) : '';
-        });
-      };
-    });
+    turPresets.onchange = ()=>{
+      if(!turPresets.value) return;
+      turInput.value = turPresets.value;
+      const yeniKategori = guessExpenseKategoriClient(turPresets.value, null);
+      kategori = yeniKategori;
+      kategoriSeg.querySelectorAll('button').forEach(x=>{
+        x.className = x.dataset.k===yeniKategori ? ('on '+(yeniKategori==='sabit'?'odendi':'kismi')) : '';
+      });
+      turPresets.value = '';
+    };
   }
   const firmaSelect = document.getElementById('f_firma_select');
   const firmaYeni = document.getElementById('f_firma_yeni');
