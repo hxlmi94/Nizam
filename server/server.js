@@ -1019,8 +1019,28 @@ async function kontrataKilitliMi(table, id, isletme_id) {
   return { exists: true, locked: !!row.kontrat_id && !row.taksit_id };
 }
 
+// Sunucu UTC'de çalıştığı için new Date().toISOString() gece yarısına yakın saatlerde
+// Türkiye'nin bir gün gerisini/ilerisini verebilir. "Bugün" varsayılan tarihlerinde ve
+// asistanın tarih farkındalığında hep Türkiye saatine göre bugünü kullanıyoruz.
+function bugunTarihIstanbul(d = new Date()) {
+  const parcalar = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(d).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  return `${parcalar.year}-${parcalar.month}-${parcalar.day}`;
+}
+
+function chatZamanEtiketi(d) {
+  try {
+    return new Intl.DateTimeFormat('tr-TR', {
+      timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    }).format(d);
+  } catch {
+    return d.toISOString();
+  }
+}
+
 async function runChatTool(name, input, isletme_id) {
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayISO = bugunTarihIstanbul();
   if (name === 'gider_ekle') {
     const { gider_turu, firma, tutar, tarih, ay, durum, proje_id, not_metni } = input || {};
     const { rows } = await q(
@@ -1164,6 +1184,13 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     let system = '';
     let tools = [];
 
+    // Asistan modelin kendiliğinden "bugün"ü veya konuşmanın ne zaman geçtiğini bilmesi
+    // mümkün değil — bunu her istekte açıkça söylememiz gerekiyor. Ayrıca aşağıda geçmiş
+    // mesajlara eklenen [gg.aa.yyyy sa:dk] etiketleri sayesinde "hangi tarihte ne konuşmuştuk"
+    // gibi sorulara da cevap verebiliyor.
+    const suAn = new Date();
+    const tarihNotu = `Bugünün tarihi: ${new Intl.DateTimeFormat('tr-TR', { timeZone: 'Europe/Istanbul', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(suAn)}, saat ${new Intl.DateTimeFormat('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit' }).format(suAn)} (Türkiye saatiyle). "Bugün ayın kaçı", "kaç gün kaldı", "vadesi geçti mi" gibi sorularda bu bilgiyi kullan.\n\nAşağıdaki konuşma geçmişinde kullanıcı mesajlarının başında [gg.aa.yyyy sa:dk] şeklinde bir zaman etiketi bulunabilir; bu etiket o mesajın gerçekte ne zaman gönderildiğini gösterir. "Hangi tarihte/ne zaman şunu konuşmuştuk" gibi sorularda bu etiketlere bakarak cevap ver; etiketleri kendi cevaplarında tekrar etme, sadece iç referans olarak kullan.\n\n`;
+
     if (isSite) {
       tools = [CHAT_TOOL_ADD_EXPENSE, CHAT_TOOL_FIND_RECORDS, CHAT_TOOL_UPDATE_EXPENSE, CHAT_TOOL_DELETE_EXPENSE];
       // Güncel duruma dair kısa bir özet çıkar, asistanın gerçek verilerden haberi olsun
@@ -1232,7 +1259,22 @@ ${projeler && projeler.length ? `\nProjeler (id numaralarıyla birlikte):\n${pro
       system = `Sen "${isletmeAdi}" işletmesinin (ofis, inşaat veya gayrimenkul projesi olabilir) muhasebe ve iş takibi asistanısın. Deneyimli bir mali müşavir gibi net, pratik ve güven verici konuş. Gelir ve gider kayıtları, personel maaş takibi, satılık/kiralık kontrat durumu hakkında sorulara yardımcı ol. Uygulamada "Kontratlar" sekmesinde satılık/kiralık mülk kontratlarının (karşı taraf, tutar, tarih, durum, belge) tutulduğunu, "Projeler" sekmesinde ise şirketin birden fazla inşaat/mimarlık projesinin her birinin kendi gelir-gider-kontrat kayıtlarıyla ayrı takip edildiğini, projeye bağlanmayan kayıtların "Ofis Geneli" sayıldığını biliyorsun; ilgili sorularda oraya yönlendirebilirsin. Kesin hukuki/vergisel konularda genel bilgi verip bir mali müşavir/avukata danışılmasını öner. Türkçe, kısa ve net cevaplar ver.\n\nÖNEMLİ: Yönetici sana bir gider/fatura ("500 TL elektrik gideri ekle") veya bir gelir/tahsilat ("10.000 TL kira geliri geldi, kaydet") eklemeni söylerse, nasıl ekleyeceğini anlatmak yerine ilgili aracı ("gider_ekle" veya "gelir_ekle") kullanarak kaydı SEN DOĞRUDAN EKLE. Kullanıcı bir proje/inşaat adı söylerse (örn. "Bahçelievler projesine ekle"), yukarıdaki proje listesinden doğru proje id'sini bul ve kullan; proje belirtmezse proje_id'yi boş bırak (Ofis Geneli sayılır). Eksik detaylar için illa soru sormana gerek yok, makul varsayımlarla (tarih belirtilmemişse bugün, durum belirtilmemişse gidercte ÖDENMEDİ / gelirde ÖDENDİ) ekleyip sonucu kısaca özetle.\n\nÖNEMLİ (var olan kayıtları düzeltme/silme): Yönetici "şu kayıt yanlış girilmiş", "durumunu ÖDENMEDİ yap", "bu kaydı sil", "mükerrer girilmiş, birini sil" gibi mevcut bir gelir/gider kaydını değiştirmeni/silmeni istediğinde, ÖNCE "kayit_bul" aracıyla doğru kaydı (ve id'sini) bul. Tek ve net bir eşleşme varsa "gider_guncelle"/"gider_sil"/"gelir_guncelle"/"gelir_sil" araçlarından uygun olanıyla işlemi SEN DOĞRUDAN YAP (izin sormana gerek yok, işlem yapıldıktan sonra ne yaptığını açıkça özetle ki yönetici kontrol edebilsin). Birden fazla aday kayıt varsa (ör. aynı isimde, yakın tarihli birkaç kayıt) ve hangisi olduğundan emin değilsen, işlemi yapmadan önce yöneticiye adayları göster ve hangisini kastettiğini sor — asla tahminle yanlış kaydı değiştirme/silme. Bir kayıt "KONTRATA BAĞLI" olarak işaretliyse asistan üzerinden değiştirilemez/silinemez; yöneticiye ilgili Kontrat kaydını Kontratlar sekmesinden düzenlemesini/silmesini söyle.\n\nGÜNCEL DURUM:\n${context}`;
     }
 
-    let messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: message }];
+    system = tarihNotu + system;
+
+    // Geçmiş kullanıcı mesajlarının gerçek gönderim zamanını modele iletmek için başlarına
+    // [gg.aa.yyyy sa:dk] etiketi ekliyoruz (sadece modele giden kopyada — veritabanındaki ve
+    // ekrandaki mesaj metni değişmiyor). created_at bilgisi olmayan eski/anlık mesajlarda etiket atlanır.
+    const etiketliGecmis = (Array.isArray(history) ? history : []).map((h) => {
+      let etiket = '';
+      if (h && h.role === 'user' && h.created_at) {
+        const d = new Date(h.created_at);
+        if (!isNaN(d.getTime())) etiket = `[${chatZamanEtiketi(d)}] `;
+      }
+      return { role: h?.role, content: etiket + (h?.content ?? '') };
+    });
+    const yeniMesajEtiketli = `[${chatZamanEtiketi(suAn)}] ${message}`;
+
+    let messages = [...etiketliGecmis, { role: 'user', content: yeniMesajEtiketli }];
     let finalText = '';
     let changed = false;
 
