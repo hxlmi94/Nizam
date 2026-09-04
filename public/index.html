@@ -624,6 +624,7 @@ async function startApp(){
   await loadIsletmeler();
   await loadAll();
   await loadSettings();
+  await loadChatHistory();
   render();
 }
 
@@ -632,6 +633,19 @@ async function loadIsletmeler(){
   const saved = Number(localStorage.getItem('zk_isletme_id'));
   if(saved && STATE.isletmeler.some(i=>i.id===saved)) STATE.currentIsletmeId = saved;
   else STATE.currentIsletmeId = STATE.isletmeler[0]?.id || null;
+}
+
+// Asistan sohbet geçmişini veritabanından yükler — böylece sayfa yenilense/uygulama
+// kapatılıp açılsa bile önceki konuşma kaybolmaz. İşletme değiştirilince de
+// o işletmeye ait geçmiş ayrı ayrı yüklenir.
+async function loadChatHistory(){
+  if(!STATE.currentIsletmeId){ STATE.chat = []; return; }
+  try{
+    STATE.chat = await api('/api/chat/history?isletme_id='+STATE.currentIsletmeId);
+  }catch(err){
+    console.error('Sohbet geçmişi yüklenemedi:', err);
+    STATE.chat = [];
+  }
 }
 
 async function switchIsletme(id){
@@ -644,6 +658,7 @@ async function switchIsletme(id){
   document.getElementById('app').innerHTML = `<div class="center-pad"><div class="spinner"></div></div>`;
   await loadAll();
   await loadSettings();
+  await loadChatHistory();
   render();
 }
 
@@ -2264,7 +2279,9 @@ async function sendChat(text){
   log.appendChild(loadingEl);
   log.scrollTop = log.scrollHeight;
   try{
-    const history = STATE.chat.slice(0,-1).map(m=>({role:m.role, content:m.content}));
+    // Modele gönderilen geçmiş, çok uzun süren tek bir oturumda bile makul boyutta
+    // kalsın diye son 40 mesajla sınırlandırılır (veritabanındaki tam geçmiş korunur).
+    const history = STATE.chat.slice(0,-1).slice(-40).map(m=>({role:m.role, content:m.content}));
     const data = await api('/api/chat', {method:'POST', body:{message:text, history, isletme_id:STATE.currentIsletmeId}});
     STATE.chat.push({role:'assistant', content:data.response});
     if(data.changed){
