@@ -1529,8 +1529,8 @@ function kontratDurumChip(durum){
   const meta = KONTRAT_DURUM_META[durum] || KONTRAT_DURUM_META.aktif;
   return `<span class="chip ${meta.chip}">${meta.label}</span>`;
 }
-const KONTRAT_TIP_LABELS_CLIENT = { satilik:'Satılık', kiralik:'Kiralık', malik:'Malik Anlaşması', taseron:'Taşeron' };
-const KONTRAT_GELIR_TIPLERI_CLIENT = ['satilik','kiralik','malik'];
+const KONTRAT_TIP_LABELS_CLIENT = { satilik:'Satılık', kiralik:'Kiralık', taseron:'Taşeron' };
+const KONTRAT_GELIR_TIPLERI_CLIENT = ['satilik','kiralik'];
 function kontratTipLabel(tip){ return KONTRAT_TIP_LABELS_CLIENT[tip] || 'Satılık'; }
 function kontratYonlu(tip){ return KONTRAT_GELIR_TIPLERI_CLIENT.includes(tip) ? 'gelir' : 'gider'; }
 
@@ -1604,7 +1604,7 @@ function openContractSheet(id, presetProjeId){
     <div class="field"><label>Tip</label>
       <div class="seg" data-role="tipSeg" style="flex-wrap:wrap;">
         <button type="button" data-tip="satilik" class="${(!k||k?.tip==='satilik')?'on odendi':''}">Satılık</button>
-        <button type="button" data-tip="kiralik" class="${(k?.tip==='kiralik'||k?.tip==='malik')?'on odendi':''}">Kiralık</button>
+        <button type="button" data-tip="kiralik" class="${k?.tip==='kiralik'?'on odendi':''}">Kiralık</button>
         <button type="button" data-tip="taseron" class="${k?.tip==='taseron'?'on kismi':''}">Taşeron</button>
       </div>
       <div style="font-size:11px;color:var(--ink-dim);margin-top:6px;">Satılık/Kiralık → para içeri girer (Gelir). Taşeron → para dışarı çıkar (Gider).</div>
@@ -1658,7 +1658,7 @@ function openContractSheet(id, presetProjeId){
   let tip = k?.tip || 'satilik';
   function updateYonUI(){
     const yon = kontratYonlu(tip);
-    document.getElementById('k_karsi_label').textContent = yon==='gider' ? 'Karşı Taraf (Taşeron / Firma)' : 'Karşı Taraf (Alıcı / Kiracı / Malik)';
+    document.getElementById('k_karsi_label').textContent = yon==='gider' ? 'Karşı Taraf (Taşeron / Firma)' : 'Karşı Taraf (Alıcı / Kiracı)';
     document.getElementById('k_yon_not').textContent = yon==='gider'
       ? 'Bu kontratı kaydettiğinde, aynı tutarda Gider tarafında da otomatik bir kayıt oluşur (veya güncellenir). Kontratı silersen, o gider kaydı da otomatik silinir.'
       : 'Bu kontratı kaydettiğinde, aynı tutarda Gelir tarafında da otomatik bir kayıt oluşur (veya güncellenir). Kontratı silersen, o gelir kaydı da otomatik silinir.';
