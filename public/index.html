@@ -2270,7 +2270,9 @@ function wireAsistan(){
 async function sendChat(text){
   text = (text||'').trim();
   if(!text) return;
-  STATE.chat.push({role:'user', content:text});
+  // created_at burada da tutuluyor ki asistan "hangi tarihte ne konuşmuştuk" gibi sorularda
+  // sunucuya gönderilen geçmişten mesajın gerçek zamanını görebilsin (bkz. server.js /api/chat).
+  STATE.chat.push({role:'user', content:text, created_at:new Date().toISOString()});
   renderMain();
   const log = document.getElementById('chatLog');
   const loadingEl = document.createElement('div');
@@ -2281,14 +2283,14 @@ async function sendChat(text){
   try{
     // Modele gönderilen geçmiş, çok uzun süren tek bir oturumda bile makul boyutta
     // kalsın diye son 40 mesajla sınırlandırılır (veritabanındaki tam geçmiş korunur).
-    const history = STATE.chat.slice(0,-1).slice(-40).map(m=>({role:m.role, content:m.content}));
+    const history = STATE.chat.slice(0,-1).slice(-40).map(m=>({role:m.role, content:m.content, created_at:m.created_at}));
     const data = await api('/api/chat', {method:'POST', body:{message:text, history, isletme_id:STATE.currentIsletmeId}});
-    STATE.chat.push({role:'assistant', content:data.response});
+    STATE.chat.push({role:'assistant', content:data.response, created_at:new Date().toISOString()});
     if(data.changed){
       await loadAll();
     }
   }catch(err){
-    STATE.chat.push({role:'assistant', content:'Bir hata oldu: '+err.message});
+    STATE.chat.push({role:'assistant', content:'Bir hata oldu: '+err.message, created_at:new Date().toISOString()});
   }
   renderMain();
 }
