@@ -1117,8 +1117,37 @@ async function runChatTool(name, input, isletme_id) {
 }
 
 // ------------------------------------------------------------------
-// Sohbet asistanı (Claude)
+// Sohbet asistanı (Claude) — geçmiş
+// Önceden sohbet geçmişi sadece tarayıcının belleğinde tutuluyordu; sayfa
+// yenilendiğinde/uygulama yeniden açıldığında asistan önceki konuşmayı tamamen
+// unutuyordu. Artık her mesaj (kullanıcı + asistanın son cevabı) işletmeye bağlı
+// olarak veritabanına kaydediliyor ve uygulama açılışında buradan geri yükleniyor.
 // ------------------------------------------------------------------
+app.get('/api/chat/history', requireAuth, async (req, res) => {
+  try {
+    const isletme_id = req.query.isletme_id;
+    if (!isletme_id) return res.status(400).json({ error: 'isletme_id gerekli' });
+    const { rows } = await q(
+      `select role, content, created_at from chat_mesajlari
+       where isletme_id = $1 order by created_at desc, id desc limit 60`,
+      [isletme_id]
+    );
+    res.json(rows.reverse());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function chatMesajKaydet(isletme_id, role, content) {
+  if (!content) return;
+  try {
+    await q('insert into chat_mesajlari (isletme_id, role, content) values ($1,$2,$3)', [isletme_id, role, content]);
+  } catch (err) {
+    console.error('Sohbet mesajı kaydedilemedi:', err.message);
+  }
+}
+
 app.post('/api/chat', requireAuth, async (req, res) => {
   if (!anthropic) return res.status(503).json({ error: 'ANTHROPIC_API_KEY tanımlı değil' });
   try {
@@ -1237,6 +1266,9 @@ ${projeler && projeler.length ? `\nProjeler (id numaralarıyla birlikte):\n${pro
       }
       messages.push({ role: 'user', content: toolResults });
     }
+
+    await chatMesajKaydet(isletme_id, 'user', message);
+    await chatMesajKaydet(isletme_id, 'assistant', finalText);
 
     res.json({ response: finalText, changed });
   } catch (err) {
