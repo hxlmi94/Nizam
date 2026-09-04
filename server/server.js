@@ -307,7 +307,7 @@ const STAFF_RETURNING = `id, isletme_id, isim, gorev, aylik_ucret, proje_id,
   belge_ad, belge_tip, (belge_data is not null) as has_belge`;
 
 // Bir kontrat imzalandığı an, yönüne göre ya Gelir ya da Gider tarafında sayılır:
-// Satılık/Kiralık/Malik Anlaşması → para İÇERİ girer, otomatik bir Gelir kaydı tutulur.
+// Satılık/Kiralık → para İÇERİ girer, otomatik bir Gelir kaydı tutulur.
 // Taşeron → para DIŞARI çıkar, otomatik bir Gider kaydı tutulur.
 // Kontrat her güncellendiğinde/silindiğinde bu kayıt da senkron kalır.
 // "gelecek" (henüz kesinleşmemiş) kontratların kaydı "ÖDENMEDİ" (beklemede) sayılır,
@@ -316,8 +316,8 @@ const STAFF_RETURNING = `id, isletme_id, isim, gorev, aylik_ucret, proje_id,
 // hiç otomatik kayıt oluşturulmaz/varsa silinir.
 // tutar_manuel=true olan bir kaydın tutarı (ortak payı/indirim yüzünden net tutar
 // sözleşmedekinden farklıysa elle değiştirilmiş demektir) kontrat güncellemesinde ezilmez.
-const KONTRAT_GELIR_TIPLERI = ['satilik', 'kiralik', 'malik'];
-const KONTRAT_TIP_LABELS = { satilik: 'Satılık', kiralik: 'Kiralık', malik: 'Malik Anlaşması', taseron: 'Taşeron' };
+const KONTRAT_GELIR_TIPLERI = ['satilik', 'kiralik'];
+const KONTRAT_TIP_LABELS = { satilik: 'Satılık', kiralik: 'Kiralık', taseron: 'Taşeron' };
 function kontratGelirDurum(kontratDurum) {
   return kontratDurum === 'gelecek' ? 'ÖDENMEDİ' : 'ÖDENDİ';
 }
@@ -339,7 +339,7 @@ async function syncContractFinans(contract) {
   const gelirYonlu = KONTRAT_GELIR_TIPLERI.includes(contract.tip);
   const dogruTablo = gelirYonlu ? 'gelirler' : 'expenses';
   const yanlisTablo = gelirYonlu ? 'expenses' : 'gelirler';
-  // Kontratın tipi değişmiş olabilir (ör. Malik'ten Taşeron'a) — yanlış yöndeki eski kaydı temizle.
+  // Kontratın tipi değişmiş olabilir (ör. Kiralık'tan Taşeron'a) — yanlış yöndeki eski kaydı temizle.
   await q(`delete from ${yanlisTablo} where kontrat_id = $1`, [contract.id]);
 
   if (contract.gelir_olustur === false) {
@@ -444,7 +444,7 @@ app.post('/api/contracts', requireAuth, async (req, res) => {
       [
         isletme_id,
         mulk_adi ?? null,
-        ['satilik', 'kiralik', 'malik', 'taseron'].includes(tip) ? tip : 'satilik',
+        ['satilik', 'kiralik', 'taseron'].includes(tip) ? tip : 'satilik',
         karsi_taraf ?? null,
         tutar ?? null,
         baslangic_tarihi ?? null,
@@ -489,7 +489,7 @@ app.put('/api/contracts/:id', requireAuth, async (req, res) => {
       [
         req.params.id,
         mulk_adi ?? null,
-        ['satilik', 'kiralik', 'malik', 'taseron'].includes(tip) ? tip : 'satilik',
+        ['satilik', 'kiralik', 'taseron'].includes(tip) ? tip : 'satilik',
         karsi_taraf ?? null,
         tutar ?? null,
         baslangic_tarihi ?? null,
@@ -512,7 +512,7 @@ app.put('/api/contracts/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Bir kontratın taksitli ödeme planını tamamen değiştirir (satılık/malik anlaşmalarında
+// Bir kontratın taksitli ödeme planını tamamen değiştirir (satılık anlaşmalarında
 // peşinat + taksitler; taşeronda da hakediş bazlı ödeme planı için kullanılabilir).
 // Gönderilen listedeki id'si olan satırlar güncellenir (taksit_id sabit kalır, bağlı
 // gelir/gider kaydının durumu/tarihi korunur), id'siz olanlar yeni taksit olarak eklenir,
@@ -1006,7 +1006,7 @@ const CHAT_TOOL_DELETE_INCOME = {
   },
 };
 
-// Kontrattan (satılık/kiralık/malik/taşeron) otomatik oluşmuş, taksitli olmayan bir gelir/gider
+// Kontrattan (satılık/kiralık/taşeron) otomatik oluşmuş, taksitli olmayan bir gelir/gider
 // kaydı "kilitli" sayılır — arayüzde de bu kayıtların silme butonu gösterilmez, çünkü kayıt bir
 // sonraki kontrat güncellemesinde/silinmesinde otomatik senkronlanır. Asistanın da bu kayıtları
 // doğrudan değiştirmesi/silmesi kontratla senkronu bozar; bu yüzden aynı kuralı burada da uyguluyoruz.
